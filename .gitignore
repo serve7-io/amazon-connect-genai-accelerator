@@ -1,0 +1,10 @@
+**/.terraform/
+**/.build/
+*.tfplan
+tfplan
+*.tfstate
+*.tfstate.*
+crash.log
+__pycache__/
+.pytest_cache/
+stacks/40-genai/models.auto.tfvars.json

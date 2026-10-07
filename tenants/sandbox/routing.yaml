@@ -1,0 +1,48 @@
+hours:
+  business:
+    timezone: America/Toronto
+    days:
+      MONDAY: ["08:00", "20:00"]
+      TUESDAY: ["08:00", "20:00"]
+      WEDNESDAY: ["08:00", "20:00"]
+      THURSDAY: ["08:00", "20:00"]
+      FRIDAY: ["08:00", "20:00"]
+      SATURDAY: ["09:00", "17:00"]
+  always:
+    timezone: America/Toronto
+    days:
+      MONDAY: ["00:00", "23:59"]
+      TUESDAY: ["00:00", "23:59"]
+      WEDNESDAY: ["00:00", "23:59"]
+      THURSDAY: ["00:00", "23:59"]
+      FRIDAY: ["00:00", "23:59"]
+      SATURDAY: ["00:00", "23:59"]
+      SUNDAY: ["00:00", "23:59"]
+
+queues:
+  general:
+    hours: always
+    max_contacts: 50
+    description: General customer queue
+  billing:
+    hours: business
+    max_contacts: 20
+    description: Billing queue (AI route_hint=billing)
+
+routing_profiles:
+  tier1:
+    default_outbound_queue: general
+    media: { VOICE: 1, CHAT: 3, TASK: 2 }
+    queues:
+      - { name: general, priority: 1, delay: 0 }
+      - { name: billing, priority: 2, delay: 0 }
+
+recording:
+  participants: ["Agent", "Customer"]
+  analytics: true
+  language: en-US
+
+messages:
+  ai_disclosure: "Thanks for contacting Serve7. You're speaking with an automated assistant. You can ask for an agent at any time."
+  closed: "Thanks for contacting Serve7. We're currently closed. Please contact us again during business hours."
+  failure: "Sorry, we couldn't connect you right now. Please try again shortly."

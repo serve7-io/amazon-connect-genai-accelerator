@@ -1,0 +1,20 @@
+# Sandbox tenant - Serve7's own account for building and demoing the accelerator.
+tenant: sandbox
+environment: dev
+account_id: "000000000000"   # TODO: replace with the sandbox account ID
+region: ca-central-1
+instance_alias: serve7-sandbox-dev   # must be unique in the region; change if taken
+cost_center: CC-SERVE7-RND
+owner: cx-platform@serve7.io
+industry: internal
+segment: internal
+ace_opportunity_id: ""
+# Preferred Bedrock models for the gateway, first available in-region wins (scripts/preflight.py).
+model_preference:
+  - anthropic.claude-haiku-4-5
+  - anthropic.claude-3-haiku
+  - amazon.nova-lite
+  - amazon.nova-micro
+# Pin explicitly to skip discovery:
+# bedrock_model_id: ""
+baseline_kpis: {}

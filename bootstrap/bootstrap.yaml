@@ -1,0 +1,428 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Serve7 Amazon Connect GenAI Accelerator - account bootstrap (E1).
+  Deploy ONCE per customer account/environment from the console with an admin identity.
+  Creates the GitHub OIDC trust, the deploy/plan roles, the workload permissions boundary,
+  the Terraform state bucket and an all-region CloudTrail with a protected log bucket.
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Default: serve7
+  GitHubRepo:
+    Type: String
+    Default: amazon-connect-genai-accelerator
+  Tenant:
+    Type: String
+    Default: sandbox
+    AllowedPattern: "^[a-z0-9-]{2,20}$"
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, test, prod]
+  CreateOidcProvider:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Set to false if the account already has the token.actions.githubusercontent.com provider.
+  CreateCloudTrail:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Set to false if an AWS Organizations trail already covers this account.
+
+Conditions:
+  MakeOidc: !Equals [!Ref CreateOidcProvider, "true"]
+  MakeTrail: !Equals [!Ref CreateCloudTrail, "true"]
+
+Resources:
+  # ---------------------------------------------------------------- KMS
+  BootstrapKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Serve7 bootstrap key (Terraform state, CloudTrail)
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AccountAdmin
+            Effect: Allow
+            Principal: { AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root" }
+            Action: "kms:*"
+            Resource: "*"
+          - Sid: CloudTrailEncrypt
+            Effect: Allow
+            Principal: { Service: cloudtrail.amazonaws.com }
+            Action: [kms:GenerateDataKey*, kms:DescribeKey]
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              StringLike:
+                kms:EncryptionContext:aws:cloudtrail:arn: !Sub "arn:${AWS::Partition}:cloudtrail:*:${AWS::AccountId}:trail/*"
+      Tags:
+        - { Key: serve7:managed-by, Value: cloudformation }
+        - { Key: serve7:layer, Value: 00-bootstrap }
+        - { Key: serve7:tenant, Value: !Ref Tenant }
+        - { Key: serve7:environment, Value: !Ref Environment }
+
+  BootstrapKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/serve7-bootstrap-${Tenant}-${Environment}"
+      TargetKeyId: !Ref BootstrapKey
+
+  # ---------------------------------------------------------------- Terraform state
+  StateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "serve7-tfstate-${AWS::AccountId}-${AWS::Region}"
+      VersioningConfiguration: { Status: Enabled }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt BootstrapKey.Arn
+            BucketKeyEnabled: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-state-versions
+            Status: Enabled
+            NoncurrentVersionExpiration: { NoncurrentDays: 90 }
+      Tags:
+        - { Key: serve7:managed-by, Value: cloudformation }
+        - { Key: serve7:layer, Value: 00-bootstrap }
+        - { Key: serve7:data-classification, Value: confidential }
+
+  StateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StateBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource: [!GetAtt StateBucket.Arn, !Sub "${StateBucket.Arn}/*"]
+            Condition: { Bool: { aws:SecureTransport: "false" } }
+
+  # ---------------------------------------------------------------- CloudTrail (ACCT-001)
+  TrailBucket:
+    Type: AWS::S3::Bucket
+    Condition: MakeTrail
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "serve7-cloudtrail-${AWS::AccountId}-${AWS::Region}"
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention: { Mode: GOVERNANCE, Days: 90 }
+      VersioningConfiguration: { Status: Enabled }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt BootstrapKey.Arn
+            BucketKeyEnabled: true
+      Tags:
+        - { Key: serve7:managed-by, Value: cloudformation }
+        - { Key: serve7:layer, Value: 00-bootstrap }
+
+  TrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: MakeTrail
+    Properties:
+      Bucket: !Ref TrailBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AclCheck
+            Effect: Allow
+            Principal: { Service: cloudtrail.amazonaws.com }
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt TrailBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/serve7-trail"
+          - Sid: Write
+            Effect: Allow
+            Principal: { Service: cloudtrail.amazonaws.com }
+            Action: s3:PutObject
+            Resource: !Sub "${TrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*"
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/serve7-trail"
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource: [!GetAtt TrailBucket.Arn, !Sub "${TrailBucket.Arn}/*"]
+            Condition: { Bool: { aws:SecureTransport: "false" } }
+          - Sid: DenyDelete
+            Effect: Deny
+            Principal: "*"
+            Action: [s3:DeleteObject, s3:DeleteObjectVersion, s3:DeleteBucket, s3:PutBucketPolicy, s3:PutLifecycleConfiguration]
+            Resource: [!GetAtt TrailBucket.Arn, !Sub "${TrailBucket.Arn}/*"]
+            Condition:
+              ArnNotLike:
+                aws:PrincipalArn: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/serve7-break-glass"
+
+  Trail:
+    Type: AWS::CloudTrail::Trail
+    Condition: MakeTrail
+    DependsOn: TrailBucketPolicy
+    Properties:
+      TrailName: serve7-trail
+      S3BucketName: !Ref TrailBucket
+      IsLogging: true
+      IsMultiRegionTrail: true
+      IncludeGlobalServiceEvents: true
+      EnableLogFileValidation: true
+      KMSKeyId: !GetAtt BootstrapKey.Arn
+      AdvancedEventSelectors:
+        - Name: Management events
+          FieldSelectors:
+            - { Field: eventCategory, Equals: [Management] }
+        - Name: Bedrock guardrail data events
+          FieldSelectors:
+            - { Field: eventCategory, Equals: [Data] }
+            - { Field: resources.type, Equals: ["AWS::Bedrock::Guardrail"] }
+
+  # ---------------------------------------------------------------- Permissions boundary
+  WorkloadBoundary:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: serve7-workload-boundary
+      Description: Ceiling for every role the pipeline creates.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowWorkloadServices
+            Effect: Allow
+            Action:
+              - logs:*
+              - cloudwatch:PutMetricData
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+              - dynamodb:*
+              - s3:GetObject
+              - s3:PutObject
+              - s3:ListBucket
+              - kms:Decrypt
+              - kms:Encrypt
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+              - kinesis:Get*
+              - kinesis:List*
+              - kinesis:Describe*
+              - kinesis:SubscribeToShard
+              - sqs:SendMessage
+              - secretsmanager:GetSecretValue
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+              - bedrock:ApplyGuardrail
+              - bedrock:GetInferenceProfile
+              - connect:Describe*
+              - connect:List*
+              - connect:StartTaskContact
+              - connect:UpdateContactAttributes
+              - wisdom:*
+              - lex:RecognizeText
+              - lex:RecognizeUtterance
+              - lex:StartConversation
+              - ec2:CreateNetworkInterface
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DeleteNetworkInterface
+              - ec2:AssignPrivateIpAddresses
+              - ec2:UnassignPrivateIpAddresses
+            Resource: "*"
+          - Sid: DenyOutsideRegion
+            Effect: Deny
+            # Bedrock is deliberately excluded: cross-region inference profiles are evaluated
+            # against their destination regions. Residency is enforced by the profile allow-list.
+            Action: ["dynamodb:*", "s3:PutObject"]
+            Resource: "*"
+            Condition:
+              StringNotEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: DenyDangerous
+            Effect: Deny
+            Action:
+              - iam:*
+              - organizations:*
+              - account:*
+              - cloudtrail:StopLogging
+              - cloudtrail:DeleteTrail
+              - kms:ScheduleKeyDeletion
+              - kms:DisableKey
+            Resource: "*"
+
+  # ---------------------------------------------------------------- GitHub OIDC
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: MakeOidc
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: serve7-deploy
+      Description: Assumed by GitHub Actions deploy.yml through OIDC for one GitHub environment.
+      MaxSessionDuration: 7200
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOrg}/${GitHubRepo}:environment:${Tenant}-${Environment}"
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/PowerUserAccess"
+      Policies:
+        - PolicyName: serve7-deploy-iam
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadIam
+                Effect: Allow
+                Action: [iam:Get*, iam:List*]
+                Resource: "*"
+              - Sid: ManageWorkloadRolesOnlyWithBoundary
+                Effect: Allow
+                Action: [iam:CreateRole, iam:PutRolePolicy, iam:AttachRolePolicy, iam:PutRolePermissionsBoundary]
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/serve7/workload/*"
+                Condition:
+                  StringEquals:
+                    iam:PermissionsBoundary: !Ref WorkloadBoundary
+              - Sid: MaintainWorkloadRoles
+                Effect: Allow
+                Action:
+                  - iam:DeleteRole
+                  - iam:DeleteRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:UpdateRole
+                  - iam:UpdateRoleDescription
+                  - iam:UpdateAssumeRolePolicy
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/serve7/workload/*"
+              - Sid: PassOnlyWorkloadRoles
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/serve7/workload/*"
+                Condition:
+                  StringEquals:
+                    iam:PassedToService:
+                      - lambda.amazonaws.com
+                      - connect.amazonaws.com
+                      - lexv2.amazonaws.com
+                      - bedrock.amazonaws.com
+                      - wisdom.amazonaws.com
+              - Sid: ServiceLinkedRoles
+                Effect: Allow
+                Action: [iam:CreateServiceLinkedRole, iam:DeleteServiceLinkedRole, iam:GetServiceLinkedRoleDeletionStatus]
+                Resource: "*"
+                Condition:
+                  StringLike:
+                    iam:AWSServiceName:
+                      - connect.amazonaws.com
+                      - lexv2.amazonaws.com
+                      - wisdom.amazonaws.com
+                      - app-integrations.amazonaws.com
+                      - profile.amazonaws.com
+                      - cases.amazonaws.com
+              - Sid: ProtectBootstrap
+                Effect: Deny
+                NotAction: [iam:Get*, iam:List*]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/serve7-deploy"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/serve7-plan"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/serve7-workload-boundary"
+              - Sid: ProtectTrail
+                Effect: Deny
+                Action: [cloudtrail:StopLogging, cloudtrail:DeleteTrail, cloudtrail:UpdateTrail, cloudtrail:PutEventSelectors]
+                Resource: !Sub "arn:${AWS::Partition}:cloudtrail:*:${AWS::AccountId}:trail/serve7-trail"
+      Tags:
+        - { Key: serve7:managed-by, Value: cloudformation }
+        - { Key: serve7:layer, Value: 00-bootstrap }
+
+  PlanRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: serve7-plan
+      Description: Read-only role used by plan.yml and drift-detect.yml (terraform plan -lock=false).
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub:
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:pull_request"
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main"
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:environment:${Tenant}-${Environment}-plan"
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/ReadOnlyAccess"
+      Policies:
+        - PolicyName: serve7-plan-state
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:ListBucket]
+                Resource: [!GetAtt StateBucket.Arn, !Sub "${StateBucket.Arn}/*"]
+              - Effect: Allow
+                Action: [kms:Decrypt]
+                Resource: !GetAtt BootstrapKey.Arn
+              - Sid: NoDataReads
+                Effect: Deny
+                Action: [s3:GetObject]
+                NotResource: [!Sub "${StateBucket.Arn}/*"]
+      Tags:
+        - { Key: serve7:managed-by, Value: cloudformation }
+        - { Key: serve7:layer, Value: 00-bootstrap }
+
+Outputs:
+  DeployRoleArn:
+    Value: !GetAtt DeployRole.Arn
+  PlanRoleArn:
+    Value: !GetAtt PlanRole.Arn
+  StateBucket:
+    Value: !Ref StateBucket
+  WorkloadBoundaryArn:
+    Value: !Ref WorkloadBoundary
+  GitHubEnvironment:
+    Description: Create this environment in the GitHub repo (Settings > Environments).
+    Value: !Sub "${Tenant}-${Environment}"

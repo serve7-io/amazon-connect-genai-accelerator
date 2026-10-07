@@ -1,0 +1,149 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "flow-logging",
+  "Actions": [
+    {
+      "Identifier": "flow-logging",
+      "Type": "UpdateFlowLoggingBehavior",
+      "Parameters": { "FlowLoggingBehavior": "Enabled" },
+      "Transitions": { "NextAction": "recording" }
+    },
+    {
+      "Identifier": "recording",
+      "Type": "UpdateContactRecordingBehavior",
+      "Parameters": {
+        "RecordingBehavior": { "RecordedParticipants": ${recorded_participants} },
+        "AnalyticsBehavior": {
+          "Enabled": "${analytics_enabled}",
+          "AnalyticsLanguage": "${analytics_language}",
+          "AnalyticsRedactionBehavior": "Enabled",
+          "AnalyticsRedactionResults": "RedactedAndOriginal",
+          "ChannelConfiguration": {
+            "Chat": { "AnalyticsModes": ["ContactLens"] },
+            "Voice": { "AnalyticsModes": ["RealTime"] }
+          }
+        }
+      },
+      "Transitions": { "NextAction": "hours-check" }
+    },
+    {
+      "Identifier": "hours-check",
+      "Type": "CheckHoursOfOperation",
+      "Parameters": { "Hours": "${hours_arn}" },
+      "Transitions": {
+        "NextAction": "ai-disclosure",
+        "Conditions": [
+          { "NextAction": "ai-disclosure", "Condition": { "Operator": "Equals", "Operands": ["True"] } },
+          { "NextAction": "closed-message", "Condition": { "Operator": "Equals", "Operands": ["False"] } }
+        ],
+        "Errors": [ { "NextAction": "ai-disclosure", "ErrorType": "NoMatchingError" } ]
+      }
+    },
+    {
+      "Identifier": "closed-message",
+      "Type": "MessageParticipant",
+      "Parameters": { "Text": "${closed_text}" },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Errors": [ { "NextAction": "disconnect", "ErrorType": "NoMatchingError" } ]
+      }
+    },
+    {
+      "Identifier": "ai-disclosure",
+      "Type": "MessageParticipant",
+      "Parameters": { "Text": "${disclosure_text}" },
+      "Transitions": {
+        "NextAction": "classify",
+        "Errors": [ { "NextAction": "classify", "ErrorType": "NoMatchingError" } ]
+      }
+    },
+    {
+      "Identifier": "classify",
+      "Type": "InvokeLambdaFunction",
+      "Parameters": {
+        "LambdaFunctionARN": "${gateway_lambda_arn}",
+        "InvocationTimeLimitSeconds": "7",
+        "LambdaInvocationAttributes": { "action": "classify" },
+        "ResponseValidation": { "ResponseType": "STRING_MAP" }
+      },
+      "Transitions": {
+        "NextAction": "save-ai-result",
+        "Errors": [ { "NextAction": "set-general-queue", "ErrorType": "NoMatchingError" } ]
+      }
+    },
+    {
+      "Identifier": "save-ai-result",
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "TargetContact": "Current",
+        "Attributes": {
+          "intent": "$.External.intent",
+          "route_hint": "$.External.route_hint",
+          "guardrail_action": "$.External.guardrailAction",
+          "ai_disclosed": "true"
+        }
+      },
+      "Transitions": {
+        "NextAction": "route",
+        "Errors": [ { "NextAction": "route", "ErrorType": "NoMatchingError" } ]
+      }
+    },
+    {
+      "Identifier": "route",
+      "Type": "Compare",
+      "Parameters": { "ComparisonValue": "$.External.route_hint" },
+      "Transitions": {
+        "NextAction": "set-general-queue",
+        "Conditions": [
+          { "NextAction": "set-billing-queue", "Condition": { "Operator": "Equals", "Operands": ["billing"] } }
+        ],
+        "Errors": [ { "NextAction": "set-general-queue", "ErrorType": "NoMatchingCondition" } ]
+      }
+    },
+    {
+      "Identifier": "set-billing-queue",
+      "Type": "UpdateContactTargetQueue",
+      "Parameters": { "QueueId": "${billing_queue_arn}" },
+      "Transitions": {
+        "NextAction": "transfer",
+        "Errors": [ { "NextAction": "set-general-queue", "ErrorType": "NoMatchingError" } ]
+      }
+    },
+    {
+      "Identifier": "set-general-queue",
+      "Type": "UpdateContactTargetQueue",
+      "Parameters": { "QueueId": "${general_queue_arn}" },
+      "Transitions": {
+        "NextAction": "transfer",
+        "Errors": [ { "NextAction": "failure-message", "ErrorType": "NoMatchingError" } ]
+      }
+    },
+    {
+      "Identifier": "transfer",
+      "Type": "TransferContactToQueue",
+      "Parameters": {},
+      "Transitions": {
+        "NextAction": "failure-message",
+        "Errors": [
+          { "NextAction": "failure-message", "ErrorType": "QueueAtCapacity" },
+          { "NextAction": "failure-message", "ErrorType": "NoMatchingError" }
+        ]
+      }
+    },
+    {
+      "Identifier": "failure-message",
+      "Type": "MessageParticipant",
+      "Parameters": { "Text": "${failure_text}" },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Errors": [ { "NextAction": "disconnect", "ErrorType": "NoMatchingError" } ]
+      }
+    },
+    {
+      "Identifier": "disconnect",
+      "Type": "DisconnectParticipant",
+      "Parameters": {},
+      "Transitions": {}
+    }
+  ]
+}
