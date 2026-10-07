@@ -2,7 +2,7 @@ name: plan
 # Terraform plan for the sandbox tenant on every PR, with the read-only serve7-plan role (OIDC).
 on:
   pull_request:
-    paths: ["stacks/**", "modules/**", "flows/**", "lambdas/**", "tenants/**", "scripts/**"]
+    paths: ["stacks/**", "modules/**", "flows/**", "lambdas/**", "tenants/**", "scripts/**", ".github/workflows/**"]
   workflow_dispatch:
 
 permissions:
@@ -16,19 +16,19 @@ concurrency:
 
 jobs:
   plan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         include:
           - tenant: sandbox
             env: dev
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.10.5
           terraform_wrapper: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install -q boto3 pyyaml
@@ -39,7 +39,7 @@ jobs:
           echo "account=$(grep -E '^account_id:' tenants/${{ matrix.tenant }}/tenant.yaml | awk '{print $2}' | tr -d '\"')" >> "$GITHUB_OUTPUT"
           echo "region=$(grep -E '^region:' tenants/${{ matrix.tenant }}/tenant.yaml | awk '{print $2}')" >> "$GITHUB_OUTPUT"
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::${{ steps.t.outputs.account }}:role/serve7-plan
           aws-region: ${{ steps.t.outputs.region }}
@@ -63,7 +63,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: plan-${{ matrix.tenant }}-${{ matrix.env }}
