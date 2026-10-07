@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install tools
-        run: pip install -q pytest boto3 cfn-lint checkov
+        run: pip install -q pytest boto3 pyyaml cfn-lint checkov
 
       - name: Terraform fmt
         run: terraform fmt -check -recursive stacks modules
@@ -38,7 +38,10 @@ jobs:
           done
 
       - name: CloudFormation lint
-        run: cfn-lint bootstrap/bootstrap.yaml modules/qic-selfservice/template.yaml
+        run: cfn-lint bootstrap/bootstrap.yaml modules/*/template.yaml
+
+      - name: Tenant folders are complete and consistent
+        run: python scripts/check-tenants.py
 
       - name: Lambda unit tests
         run: python -m pytest -q lambdas/genai_gateway/tests lambdas/agent_tools/tests

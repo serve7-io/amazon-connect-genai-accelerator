@@ -34,6 +34,14 @@ ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
 STATE_BUCKET="serve7-tfstate-${ACCOUNT}-${REGION}"
 say "Tenant ${TENANT}/${ENVIRONMENT} -> account ${ACCOUNT}, region ${REGION}"
 
+# Guard: never deploy a tenant into the wrong AWS account.
+EXPECTED_ACCOUNT="$(grep -E '^account_id:' "$ROOT/tenants/$TENANT/tenant.yaml" | awk '{print $2}' | tr -d '"')"
+if [[ -n "$EXPECTED_ACCOUNT" && "$EXPECTED_ACCOUNT" != "$ACCOUNT" ]]; then
+  echo "ERROR: tenants/$TENANT/tenant.yaml expects account $EXPECTED_ACCOUNT but credentials are for $ACCOUNT." >&2
+  echo "       Switch credentials (e.g. eval \"\$(scripts/assume-tenant.sh $EXPECTED_ACCOUNT)\") and retry." >&2
+  exit 1
+fi
+
 # ------------------------------------------------------------------ bootstrap (E1)
 if [[ -z "${ONLY:-}" && "${PLAN_ONLY:-0}" != "1" ]]; then
   if ! aws cloudformation describe-stacks --stack-name serve7-bootstrap >/dev/null 2>&1 || [[ "${REBOOTSTRAP:-0}" == "1" ]]; then
@@ -45,7 +53,19 @@ if [[ -z "${ONLY:-}" && "${PLAN_ONLY:-0}" != "1" ]]; then
       OIDC=true
       aws iam list-open-id-connect-providers --query 'OpenIDConnectProviderList[].Arn' --output text | grep -q token.actions.githubusercontent.com && OIDC=false
       OIDC_ARG=(CreateOidcProvider="$OIDC")
+      # GitHub trust for CI: derived from the git remote unless set explicitly.
+      ORIGIN="$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)"
+      if [[ "$ORIGIN" =~ github.com[:/]([^/]+)/([^/.]+) ]]; then
+        GITHUB_ORG="${GITHUB_ORG:-${BASH_REMATCH[1]}}"; GITHUB_REPO="${GITHUB_REPO:-${BASH_REMATCH[2]}}"
+      fi
+      if [[ -z "${GITHUB_SUBJECT_PREFIX:-}" && -n "${GITHUB_ORG:-}" ]] && command -v gh >/dev/null; then
+        GITHUB_SUBJECT_PREFIX="$(gh api "repos/${GITHUB_ORG}/${GITHUB_REPO}/actions/oidc/customization/sub" --jq '.sub_claim_prefix // ""' 2>/dev/null || true)"
+      fi
     fi
+    [[ -n "${GITHUB_ORG:-}" ]] && OIDC_ARG+=(GitHubOrg="$GITHUB_ORG")
+    [[ -n "${GITHUB_REPO:-}" ]] && OIDC_ARG+=(GitHubRepo="$GITHUB_REPO")
+    [[ -n "${GITHUB_SUBJECT_PREFIX:-}" ]] && OIDC_ARG+=(GitHubSubjectPrefix="$GITHUB_SUBJECT_PREFIX")
+    [[ -n "${DEPLOY_TRUST:-}" ]] && OIDC_ARG+=(DeployTrust="$DEPLOY_TRUST")
     TRAIL="${CREATE_TRAIL:-true}"
     aws cloudformation deploy \
       --stack-name serve7-bootstrap \

@@ -1,0 +1,9 @@
+{{COMPANY}} - Customer FAQ (starter content)
+Replace this file with the client's real knowledge articles (one topic per paragraph works best).
+Every .txt file in tenants/{{TENANT}}/knowledge/ is synced to the Q in Connect knowledge base on deploy.
+
+Opening hours
+Our contact centre is open Monday to Friday from 8:00 to 20:00 and Saturday from 9:00 to 17:00 ({{TIMEZONE}}). Chat with our automated assistant is available 24/7.
+
+Contacting an agent
+You can ask to speak with an agent at any time during opening hours.
