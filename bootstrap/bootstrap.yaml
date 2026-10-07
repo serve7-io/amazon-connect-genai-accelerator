@@ -25,6 +25,11 @@ Parameters:
     Default: "true"
     AllowedValues: ["true", "false"]
     Description: Set to false if the account already has the token.actions.githubusercontent.com provider.
+  DeployTrust:
+    Type: String
+    Default: environment
+    AllowedValues: [environment, main-branch]
+    Description: environment = trust GitHub environment Tenant-Environment; main-branch = trust refs/heads/main (free private repos)
   CreateCloudTrail:
     Type: String
     Default: "true"
@@ -34,6 +39,7 @@ Parameters:
 Conditions:
   MakeOidc: !Equals [!Ref CreateOidcProvider, "true"]
   MakeTrail: !Equals [!Ref CreateCloudTrail, "true"]
+  TrustEnvironment: !Equals [!Ref DeployTrust, environment]
 
 Resources:
   # ---------------------------------------------------------------- KMS
@@ -304,7 +310,10 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOrg}/${GitHubRepo}:environment:${Tenant}-${Environment}"
+                token.actions.githubusercontent.com:sub: !If
+                  - TrustEnvironment
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:environment:${Tenant}-${Environment}"
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main"
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/PowerUserAccess"
       Policies:

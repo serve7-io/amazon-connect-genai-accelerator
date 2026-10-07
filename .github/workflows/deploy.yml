@@ -28,7 +28,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.tenant || 'sandbox' }}-${{ inputs.env || 'dev' }}   # prod environments require reviewers
+    environment: ${{ vars.USE_ENVIRONMENTS != 'false' && format('{0}-{1}', inputs.tenant || 'sandbox', inputs.env || 'dev') || '' }}
     env:
       TENANT: ${{ inputs.tenant || 'sandbox' }}
       ENVIRONMENT: ${{ inputs.env || 'dev' }}
