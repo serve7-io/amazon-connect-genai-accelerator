@@ -24,6 +24,11 @@ variable "kinesis_stream_mode" {
   }
 }
 
+variable "multi_party_conference_enabled" {
+  type    = bool
+  default = true
+}
+
 variable "instance_alias" {
   description = "Globally unique within the region; becomes https://<alias>.my.connect.aws"
   type        = string
@@ -38,6 +43,7 @@ resource "aws_connect_instance" "this" {
   contact_lens_enabled             = true
   auto_resolve_best_voices_enabled = true
   early_media_enabled              = true
+  multi_party_conference_enabled   = var.multi_party_conference_enabled
 
   tags = { "serve7:component" = "connect-instance" }
 
@@ -71,22 +77,6 @@ resource "aws_connect_instance_storage_config" "chat_transcripts" {
     s3_config {
       bucket_name   = local.f.recordings_bucket
       bucket_prefix = "chat-transcripts"
-      encryption_config {
-        encryption_type = "KMS"
-        key_id          = local.f.kms_connect_arn
-      }
-    }
-  }
-}
-
-resource "aws_connect_instance_storage_config" "scheduled_reports" {
-  instance_id   = aws_connect_instance.this.id
-  resource_type = "SCHEDULED_REPORTS"
-  storage_config {
-    storage_type = "S3"
-    s3_config {
-      bucket_name   = local.f.recordings_bucket
-      bucket_prefix = "reports"
       encryption_config {
         encryption_type = "KMS"
         key_id          = local.f.kms_connect_arn
