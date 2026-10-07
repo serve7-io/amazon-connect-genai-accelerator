@@ -2,10 +2,13 @@
 # Everything is driven by tenants/<tenant>/routing.yaml.
 
 locals {
-  layer   = "30-routing"
-  c       = data.terraform_remote_state.core.outputs
-  g       = data.terraform_remote_state.genai.outputs
-  routing = yamldecode(file(var.routing_file))
+  layer = "30-routing"
+  # SAML instances: users authenticate at the IdP, so no Connect password / secret is created.
+  local_passwords = try(data.terraform_remote_state.core.outputs.identity_management_type, "CONNECT_MANAGED") == "CONNECT_MANAGED"
+  password_users  = local.local_passwords ? { for u in var.admin_users : u.username => u } : {}
+  c               = data.terraform_remote_state.core.outputs
+  g               = data.terraform_remote_state.genai.outputs
+  routing         = yamldecode(file(var.routing_file))
 
   day_names = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]
 }
@@ -174,7 +177,7 @@ data "aws_connect_security_profile" "agent" {
 }
 
 resource "random_password" "admin" {
-  for_each         = { for u in var.admin_users : u.username => u }
+  for_each         = local.password_users
   length           = 20
   special          = true
   override_special = "!#%*-_+="
@@ -185,7 +188,7 @@ resource "random_password" "admin" {
 }
 
 resource "aws_secretsmanager_secret" "admin" {
-  for_each                = { for u in var.admin_users : u.username => u }
+  for_each                = local.password_users
   name                    = "${local.prefix}/connect-user/${each.key}"
   recovery_window_in_days = 7
 }
@@ -200,7 +203,7 @@ resource "aws_connect_user" "admin" {
   for_each             = { for u in var.admin_users : u.username => u }
   instance_id          = local.c.instance_id
   name                 = each.key
-  password             = random_password.admin[each.key].result
+  password             = local.local_passwords ? random_password.admin[each.key].result : null
   routing_profile_id   = aws_connect_routing_profile.this["tier1"].routing_profile_id
   security_profile_ids = [data.aws_connect_security_profile.admin.security_profile_id, data.aws_connect_security_profile.agent.security_profile_id]
 

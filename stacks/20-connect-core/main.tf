@@ -29,6 +29,19 @@ variable "multi_party_conference_enabled" {
   default = true
 }
 
+variable "identity_management_type" {
+  description = <<-EOT
+    How agents sign in. CONNECT_MANAGED = local users (sandbox/dev); SAML = the client's IdP / IAM Identity Center
+    (production). Changing it REPLACES the instance (new phone numbers, flows, history) - decide before go-live.
+  EOT
+  type        = string
+  default     = "CONNECT_MANAGED"
+  validation {
+    condition     = contains(["CONNECT_MANAGED", "SAML", "EXISTING_DIRECTORY"], var.identity_management_type)
+    error_message = "identity_management_type must be CONNECT_MANAGED, SAML or EXISTING_DIRECTORY."
+  }
+}
+
 variable "instance_alias" {
   description = "Globally unique within the region; becomes https://<alias>.my.connect.aws"
   type        = string
@@ -36,7 +49,7 @@ variable "instance_alias" {
 
 resource "aws_connect_instance" "this" {
   instance_alias                   = var.instance_alias
-  identity_management_type         = "CONNECT_MANAGED"
+  identity_management_type         = var.identity_management_type
   inbound_calls_enabled            = true
   outbound_calls_enabled           = true
   contact_flow_logs_enabled        = true
@@ -47,9 +60,8 @@ resource "aws_connect_instance" "this" {
 
   tags = { "serve7:component" = "connect-instance" }
 
-  lifecycle {
-    prevent_destroy = false # true for prod tenants (override file)
-  }
+  # Terraform cannot vary prevent_destroy per tenant; prod instances are protected by scripts/destroy.sh
+  # (refuses prod without PROD_CONFIRM) and by the plan/approval gate in CI.
 }
 
 # ------------------------------------------------------------ recordings + transcripts
@@ -150,6 +162,10 @@ output "ctr_stream_arn" {
 
 output "agent_events_stream_arn" {
   value = aws_kinesis_stream.agent_events.arn
+}
+
+output "identity_management_type" {
+  value = aws_connect_instance.this.identity_management_type
 }
 
 output "access_url" {

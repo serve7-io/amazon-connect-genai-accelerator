@@ -15,7 +15,8 @@ TF_VERSION="${TF_VERSION:-1.10.5}"
 LAYERS="${ONLY:-10-foundation 20-connect-core 40-genai 30-routing 50-observability}"
 TFVARS="$ROOT/tenants/$TENANT/$ENVIRONMENT.tfvars"
 
-REGION="$(grep -E '^region:' "$ROOT/tenants/$TENANT/tenant.yaml" | awk '{print $2}')"
+TI() { python3 "$ROOT/scripts/tenant-info.py" "$TENANT" "$ENVIRONMENT" "$1"; }
+REGION="$(TI region)"
 export AWS_REGION="$REGION" AWS_DEFAULT_REGION="$REGION"
 
 say() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
@@ -35,10 +36,24 @@ STATE_BUCKET="serve7-tfstate-${ACCOUNT}-${REGION}"
 say "Tenant ${TENANT}/${ENVIRONMENT} -> account ${ACCOUNT}, region ${REGION}"
 
 # Guard: never deploy a tenant into the wrong AWS account.
-EXPECTED_ACCOUNT="$(grep -E '^account_id:' "$ROOT/tenants/$TENANT/tenant.yaml" | awk '{print $2}' | tr -d '"')"
+EXPECTED_ACCOUNT="$(TI account_id)"
 if [[ -n "$EXPECTED_ACCOUNT" && "$EXPECTED_ACCOUNT" != "$ACCOUNT" ]]; then
-  echo "ERROR: tenants/$TENANT/tenant.yaml expects account $EXPECTED_ACCOUNT but credentials are for $ACCOUNT." >&2
+  echo "ERROR: tenants/$TENANT/tenant.yaml expects account $EXPECTED_ACCOUNT for '$ENVIRONMENT' but credentials are for $ACCOUNT." >&2
   echo "       Switch credentials (e.g. eval \"\$(scripts/assume-tenant.sh $EXPECTED_ACCOUNT)\") and retry." >&2
+  exit 1
+fi
+
+# Guard: one environment per account (state keys and the bootstrap stack are per account).
+BOOT_ENV="$(aws cloudformation describe-stacks --stack-name serve7-bootstrap \
+  --query "Stacks[0].Parameters[?ParameterKey=='Environment'].ParameterValue" --output text 2>/dev/null || true)"
+if [[ -n "$BOOT_ENV" && "$BOOT_ENV" != "None" && "$BOOT_ENV" != "$ENVIRONMENT" ]]; then
+  echo "ERROR: account $ACCOUNT is bootstrapped for environment '$BOOT_ENV', not '$ENVIRONMENT'. Use a separate account per environment." >&2
+  exit 1
+fi
+
+# Guard: production needs an explicit confirmation outside CI (CI uses the GitHub environment approval instead).
+if [[ "$ENVIRONMENT" == "prod" && -z "${GITHUB_ACTIONS:-}" && "${PROD_CONFIRM:-}" != "$TENANT" ]]; then
+  echo "ERROR: deploying ${TENANT}/prod from a workstation requires PROD_CONFIRM=${TENANT}." >&2
   exit 1
 fi
 
@@ -86,7 +101,7 @@ python3 "$ROOT/scripts/preflight.py" --tenant "$TENANT" --region "$REGION" ${SKI
 # ------------------------------------------------------------------ layers
 EXTRA_VARS=(-var "state_bucket=${STATE_BUCKET}" -var "release=${RELEASE:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo manual)}")
 # Connect aliases are unique per region across all AWS customers: default to one derived from the account.
-TENANT_ALIAS="$(grep -E '^instance_alias:' "$ROOT/tenants/$TENANT/tenant.yaml" | awk '{print $2}')"
+TENANT_ALIAS="$(TI instance_alias)"
 ALIAS="${INSTANCE_ALIAS:-${TENANT_ALIAS:-s7-${TENANT}-${ENVIRONMENT}-${ACCOUNT: -6}}}"
 
 # CloudShell home is 1 GB and the AWS provider is ~700 MB: keep providers and .terraform in /tmp, shared by all layers.

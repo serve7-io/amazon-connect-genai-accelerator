@@ -41,24 +41,49 @@ for d in tenants:
     t = yaml.safe_load((d / "tenant.yaml").read_text())
     if t.get("tenant") != name:
         err(name, f"tenant.yaml says tenant={t.get('tenant')!r}, folder is {name!r}")
-    acct = str(t.get("account_id", ""))
-    if not re.fullmatch(r"\d{12}", acct):
-        err(name, f"account_id {acct!r} is not 12 digits (quote it in YAML)")
-    elif acct in accounts:
-        err(name, f"account {acct} also used by {accounts[acct]} (one Connect tenant per account)")
-    accounts[acct] = name
-    alias = t.get("instance_alias")
-    if alias:
-        if alias in aliases:
-            err(name, f"instance_alias {alias} also used by {aliases[alias]}")
-        aliases[alias] = name
+    envs = {t.get("environment", "dev"): {"account_id": t.get("account_id"), "instance_alias": t.get("instance_alias")}}
+    for en, ov in (t.get("environments") or {}).items():
+        envs[en] = {"account_id": ov.get("account_id", t.get("account_id")), "instance_alias": ov.get("instance_alias")}
+    for en, e in envs.items():
+        acct = str(e["account_id"] or "")
+        if not re.fullmatch(r"\d{12}", acct):
+            err(name, f"{en}: account_id {acct!r} is not 12 digits (quote it in YAML)")
+        elif acct in accounts:
+            err(name, f"{en}: account {acct} also used by {accounts[acct]} (one environment per account)")
+        accounts[acct] = f"{name}/{en}"
+        if not e["instance_alias"]:
+            err(name, f"{en}: instance_alias missing")
+        elif e["instance_alias"] in aliases:
+            err(name, f"{en}: instance_alias {e['instance_alias']} also used by {aliases[e['instance_alias']]}")
+        else:
+            aliases[e["instance_alias"]] = f"{name}/{en}"
+        if not (d / f"{en}.tfvars").exists():
+            err(name, f"environment {en} has no {en}.tfvars")
 
     for tf in d.glob("*.tfvars"):
         text = tf.read_text()
-        for key, want in (("tenant", name), ("region", t.get("region")), ("instance_alias", alias)):
+        en = tf.stem
+        if en not in envs:
+            err(name, f"{tf.name} has no matching environment in tenant.yaml")
+            continue
+        for key, want in (("tenant", name), ("region", t.get("region")), ("instance_alias", envs[en]["instance_alias"]),
+                          ("environment", en)):
             got = tfvar(text, key)
             if got is not None and want and got != want:
                 err(name, f"{tf.name}: {key}={got!r} but tenant.yaml has {want!r}")
+        if en == "prod":
+            rules = {
+                "enforce_guardrail_iam": (r"^\s*enforce_guardrail_iam\s*=\s*true", "must be true"),
+                "kinesis_stream_mode": (r'^\s*kinesis_stream_mode\s*=\s*"ON_DEMAND"', 'must be "ON_DEMAND"'),
+            }
+            for key, (rx, why) in rules.items():
+                if not re.search(rx, text, re.M):
+                    err(name, f"prod.tfvars: {key} {why}")
+            m = re.search(r"^\s*recording_retention_days\s*=\s*(\d+)", text, re.M)
+            if m and int(m.group(1)) < 90:
+                err(name, "prod.tfvars: recording_retention_days below 90")
+            if re.search(r'identity_management_type\s*=\s*"CONNECT_MANAGED"', text) and "allow_local_users_in_prod" not in text:
+                err(name, "prod.tfvars: CONNECT_MANAGED users in prod need an explicit '# allow_local_users_in_prod' waiver")
         rf = tfvar(text, "routing_file")
         if rf and not (ROOT / "stacks" / "30-routing" / rf).resolve().exists():
             err(name, f"{tf.name}: routing_file {rf} does not exist")

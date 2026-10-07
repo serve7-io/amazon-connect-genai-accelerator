@@ -110,6 +110,40 @@ From now on, changes reach the client only through PR → plan → merge → dep
 - [ ] Phone number quota requested, if voice is in scope
 - [ ] Competency evidence captured (screenshots + `tests/smoke.py` output) into the evidence pack
 
+## Production environment
+
+Production is a **separate AWS account** for the same tenant. `deploy.sh` refuses to put two environments in one account,
+because state keys and the bootstrap stack are per account.
+
+1. Create the prod account (step 0), then scaffold with both accounts:
+   ```bash
+   python3 scripts/new-tenant.py --tenant <client> --account-id <dev> --prod-account-id <prod> --company "..." --owner-email ...
+   ```
+   Or add the following to an existing `tenant.yaml`, then copy `templates/tenant/prod.tfvars.optional` to `prod.tfvars` and fill in the values:
+   ```yaml
+   environments:
+     prod:
+       account_id: "<prod>"
+       instance_alias: s7-<client>-prod-<last6>
+   ```
+2. Defaults in `prod.tfvars`, enforced by `check-tenants.py` in CI:
+
+   | Setting | Prod value | Why |
+   |---|---|---|
+   | `identity_management_type` | `SAML` | Agents sign in via the client IdP. **Fixed at instance creation.** Local users need a written `# allow_local_users_in_prod` waiver |
+   | `enforce_guardrail_iam` | `true` | Every model call must carry the tenant guardrail |
+   | `kinesis_stream_mode` | `ON_DEMAND` | Scales with real traffic |
+   | `recording_retention_days` | 365 (≥ 90 enforced) | Set from the client contract |
+   | `enable_invocation_logging` | `false` | Prompts contain PII; enable only with written client approval |
+   | `data_classification` | `confidential` | Tags every resource |
+
+3. Deploy production:
+   - **CI only:** create the GitHub environment `<client>-prod` **with required reviewers**. This needs GitHub Pro/Team or the Serve7 org.
+   - Then run `gh workflow run deploy -f tenant=<client> -f env=prod`.
+   - Bootstrap the prod account once, from an admin session: `PROD_CONFIRM=<client> AUTO_APPROVE=1 ./scripts/deploy.sh <client> prod`.
+     Without `PROD_CONFIRM`, `deploy.sh` refuses a local prod deploy.
+4. `destroy.sh` never destroys prod.
+
 ## Removing a tenant
 
 ```bash
