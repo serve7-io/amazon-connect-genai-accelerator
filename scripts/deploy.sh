@@ -139,6 +139,7 @@ for layer in $LAYERS; do
   if [[ "$layer" == "40-genai" ]]; then
     say "Syncing knowledge base content"
     python3 "$ROOT/scripts/sync-knowledge.py" --tenant "$TENANT" --env "$ENVIRONMENT" || echo "(knowledge sync skipped)"
+    python3 "$ROOT/scripts/seed-demo-crm.py" --tenant "$TENANT" --env "$ENVIRONMENT" || echo "(demo CRM seed skipped)"
   fi
 done
 
