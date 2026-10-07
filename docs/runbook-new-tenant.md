@@ -120,11 +120,26 @@ Then close the member account in Organizations.
 
 ---
 
-## Evidence: client-demo reference deployment
+## Evidence: client-demo reference deployment (2026-10-07)
 
-| Step | Started | Finished | Duration | Notes |
-|------|---------|----------|----------|-------|
-| 0 Account | | | ~1 min | `serve7-client-demo` (915626646645) |
-| 1 Scaffold | | | < 1 min | |
-| 3 Deploy | | | | |
-| 4 Smoke | | | | |
+Fictional client "Northwind Demo Inc", brand-new Organizations member account 915626646645, ca-central-1.
+
+| Step | Duration | Result |
+|------|----------|--------|
+| 0 Account (`organizations create-account`) | ~1 min | SUCCEEDED |
+| 1 Scaffold (`new-tenant.py`) + `check-tenants.py` | < 1 min | 4 files, all checks pass |
+| 3a Bootstrap (inside `deploy.sh`) | ~1 min | OIDC trust, deploy/plan roles, boundary, state bucket, CloudTrail |
+| 3b Layers 10 → 50 (`deploy.sh`) | **6 min 45 s** | 74 resources: 27 + 7 + 21 + 10 + 9, knowledge synced, no manual fixes |
+| 4 Smoke tests | ~30 s | **11/11 pass**: instance, storage, flow, GenAI routing 0.95, guardrail blocks injection, Q in Connect answers |
+| 5 CI pipeline deploy (`gh workflow run deploy -f tenant=client-demo`) | 3 min 17 s | OIDC into the client account, all layers no-op, smoke green |
+
+**From empty AWS account to a tested Connect + GenAI contact centre: about 10 minutes of machine time.**
+
+Guards that fired during the run, both working as designed:
+- `deploy.sh` refused to deploy client-demo with sandbox credentials (account guard).
+- Pre-flight stopped on "Bedrock account being verified". The run continued with the pinned model via `SKIP_MODEL_TEST=1`; verification cleared before the smoke tests ran.
+
+Operator notes:
+- Root cannot assume roles. Onboard from an IAM Identity Center admin session (permission set `Serve7-Admin`), or open the console and CloudShell in the member account directly from the access portal.
+- Every browser tab or account has its own CloudShell home. Install `gh` and clone the repo once per identity.
+- Member accounts created by Organizations have no root password. Enable Organizations "centralized root access" so the MFA warning can be cleared.
