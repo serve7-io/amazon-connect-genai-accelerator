@@ -46,3 +46,5 @@ messages:
   ai_disclosure: "Thanks for contacting Serve7. You're speaking with an automated assistant. You can ask for an agent at any time."
   closed: "Thanks for contacting Serve7. We're currently closed. Please contact us again during business hours."
   failure: "Sorry, we couldn't connect you right now. Please try again shortly."
+  self_service_prompt: "How can I help you today? You can ask me about orders, billing, returns or opening hours."
+  goodbye: "Thanks for contacting Serve7. Have a great day!"

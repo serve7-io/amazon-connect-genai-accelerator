@@ -53,10 +53,55 @@
       "Type": "MessageParticipant",
       "Parameters": { "Text": "${disclosure_text}" },
       "Transitions": {
-        "NextAction": "classify",
+        "NextAction": "${self_service ? "qic-session" : "classify"}",
+        "Errors": [ { "NextAction": "${self_service ? "qic-session" : "classify"}", "ErrorType": "NoMatchingError" } ]
+      }
+    },%{ if self_service }
+    {
+      "Identifier": "qic-session",
+      "Type": "CreateWisdomSession",
+      "Parameters": { "WisdomAssistantArn": "${qic_assistant_arn}" },
+      "Transitions": {
+        "NextAction": "self-service",
         "Errors": [ { "NextAction": "classify", "ErrorType": "NoMatchingError" } ]
       }
     },
+    {
+      "Identifier": "self-service",
+      "Type": "ConnectParticipantWithLexBot",
+      "Parameters": {
+        "Text": "${self_service_prompt}",
+        "LexV2Bot": { "AliasArn": "${lex_bot_alias_arn}" }
+      },
+      "Transitions": {
+        "NextAction": "check-tool",
+        "Errors": [
+          { "NextAction": "check-tool", "ErrorType": "NoMatchingCondition" },
+          { "NextAction": "classify", "ErrorType": "NoMatchingError" }
+        ]
+      }
+    },
+    {
+      "Identifier": "check-tool",
+      "Type": "Compare",
+      "Parameters": { "ComparisonValue": "$.Lex.SessionAttributes.Tool" },
+      "Transitions": {
+        "NextAction": "classify",
+        "Conditions": [
+          { "NextAction": "goodbye", "Condition": { "Operator": "Equals", "Operands": ["Complete"] } }
+        ],
+        "Errors": [ { "NextAction": "classify", "ErrorType": "NoMatchingCondition" } ]
+      }
+    },
+    {
+      "Identifier": "goodbye",
+      "Type": "MessageParticipant",
+      "Parameters": { "Text": "${goodbye_text}" },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Errors": [ { "NextAction": "disconnect", "ErrorType": "NoMatchingError" } ]
+      }
+    },%{ endif }
     {
       "Identifier": "classify",
       "Type": "InvokeLambdaFunction",

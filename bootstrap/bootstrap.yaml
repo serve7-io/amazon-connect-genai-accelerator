@@ -248,6 +248,8 @@ Resources:
               - connect:StartTaskContact
               - connect:UpdateContactAttributes
               - wisdom:*
+              - polly:SynthesizeSpeech
+              - comprehend:DetectSentiment
               - lex:RecognizeText
               - lex:RecognizeUtterance
               - lex:StartConversation

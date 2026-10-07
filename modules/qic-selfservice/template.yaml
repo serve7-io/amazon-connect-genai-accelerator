@@ -1,0 +1,184 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Serve7 accelerator - Amazon Q in Connect self-service (knowledge-base answers) wired into Amazon Connect.
+  Assistant + custom knowledge base + Lex V2 bot with AMAZON.QinConnectIntent + Connect integrations.
+  Deployed by stacks/40-genai through aws_cloudformation_stack (validated with cfn-lint schemas).
+
+Parameters:
+  Prefix:
+    Type: String
+  ConnectInstanceArn:
+    Type: String
+  KmsKeyArn:
+    Type: String
+  PermissionsBoundaryArn:
+    Type: String
+  RolePath:
+    Type: String
+    Default: /serve7/workload/
+  LocaleId:
+    Type: String
+    Default: en_US
+  VoiceId:
+    Type: String
+    Default: Joanna
+
+Resources:
+  # ------------------------------------------------------------ Q in Connect
+  Assistant:
+    Type: AWS::Wisdom::Assistant
+    Properties:
+      Name: !Sub "${Prefix}-assistant"
+      Type: AGENT
+      ServerSideEncryptionConfiguration:
+        KmsKeyId: !Ref KmsKeyArn
+
+  KnowledgeBase:
+    Type: AWS::Wisdom::KnowledgeBase
+    Properties:
+      Name: !Sub "${Prefix}-kb"
+      Description: Customer-facing knowledge, synced from tenants/<tenant>/knowledge by scripts/sync-knowledge.py
+      KnowledgeBaseType: CUSTOM
+      ServerSideEncryptionConfiguration:
+        KmsKeyId: !Ref KmsKeyArn
+
+  AssistantKnowledgeBase:
+    Type: AWS::Wisdom::AssistantAssociation
+    Properties:
+      AssistantId: !GetAtt Assistant.AssistantId
+      AssociationType: KNOWLEDGE_BASE
+      Association:
+        KnowledgeBaseId: !GetAtt KnowledgeBase.KnowledgeBaseId
+
+  ConnectAssistant:
+    Type: AWS::Connect::IntegrationAssociation
+    Properties:
+      InstanceId: !Ref ConnectInstanceArn
+      IntegrationType: WISDOM_ASSISTANT
+      IntegrationArn: !GetAtt Assistant.AssistantArn
+
+  ConnectKnowledgeBase:
+    Type: AWS::Connect::IntegrationAssociation
+    Properties:
+      InstanceId: !Ref ConnectInstanceArn
+      IntegrationType: WISDOM_KNOWLEDGE_BASE
+      IntegrationArn: !GetAtt KnowledgeBase.KnowledgeBaseArn
+
+  # ------------------------------------------------------------ Lex V2 bot
+  LexRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: !Ref RolePath
+      PermissionsBoundary: !Ref PermissionsBoundaryArn
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lexv2.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: lex-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Speech
+                Effect: Allow
+                Action: [polly:SynthesizeSpeech, comprehend:DetectSentiment]
+                Resource: "*" # neither service supports resource-level permissions for these actions
+              - Sid: QInConnectAssistantPolicy
+                Effect: Allow
+                Action: [wisdom:CreateSession, wisdom:GetAssistant]
+                Resource:
+                  - !GetAtt Assistant.AssistantArn
+                  - !Sub "${Assistant.AssistantArn}/*"
+              - Sid: QInConnectSessionsPolicy
+                Effect: Allow
+                Action: [wisdom:SendMessage, wisdom:GetNextMessage]
+                Resource: !Sub "arn:${AWS::Partition}:wisdom:${AWS::Region}:${AWS::AccountId}:session/${Assistant.AssistantId}/*"
+              - Sid: QInConnectKmsCMKPolicy
+                Effect: Allow
+                Action: [kms:Decrypt, kms:GenerateDataKey]
+                Resource: !Ref KmsKeyArn
+
+  Bot:
+    Type: AWS::Lex::Bot
+    Properties:
+      Name: !Sub "${Prefix}-selfservice"
+      Description: Serve7 self-service bot - Amazon Q in Connect answers from the tenant knowledge base
+      RoleArn: !GetAtt LexRole.Arn
+      DataPrivacy: { ChildDirected: false }
+      IdleSessionTTLInSeconds: 300
+      AutoBuildBotLocales: true
+      BotLocales:
+        - LocaleId: !Ref LocaleId
+          NluConfidenceThreshold: 0.4
+          VoiceSettings: { VoiceId: !Ref VoiceId, Engine: neural }
+          Intents:
+            - Name: QInConnectIntent
+              Description: Hands the conversation to Amazon Q in Connect
+              ParentIntentSignature: AMAZON.QinConnectIntent
+              QInConnectIntentConfiguration:
+                QInConnectAssistantConfiguration:
+                  AssistantArn: !GetAtt Assistant.AssistantArn
+            - Name: FallbackIntent
+              Description: Default fallback
+              ParentIntentSignature: AMAZON.FallbackIntent
+
+  BotVersion:
+    Type: AWS::Lex::BotVersion
+    Properties:
+      BotId: !Ref Bot
+      Description: Published by Terraform
+      BotVersionLocaleSpecification:
+        - LocaleId: !Ref LocaleId
+          BotVersionLocaleDetails: { SourceBotVersion: DRAFT }
+
+  BotAlias:
+    Type: AWS::Lex::BotAlias
+    Properties:
+      BotId: !Ref Bot
+      BotAliasName: live
+      BotVersion: !GetAtt BotVersion.BotVersion
+      BotAliasLocaleSettings:
+        - LocaleId: !Ref LocaleId
+          BotAliasLocaleSetting: { Enabled: true }
+      SentimentAnalysisSettings: { DetectSentiment: false }
+
+  BotAliasPolicy:
+    Type: AWS::Lex::ResourcePolicy
+    Properties:
+      ResourceArn: !GetAtt BotAlias.Arn
+      Policy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowConnectInstance
+            Effect: Allow
+            Principal: { Service: connect.amazonaws.com }
+            Action: [lex:RecognizeText, lex:RecognizeUtterance, lex:StartConversation, lex:DeleteSession, lex:PutSession]
+            Resource: !GetAtt BotAlias.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                aws:SourceArn: !Ref ConnectInstanceArn
+
+  ConnectBot:
+    Type: AWS::Connect::IntegrationAssociation
+    DependsOn: BotAliasPolicy
+    Properties:
+      InstanceId: !Ref ConnectInstanceArn
+      IntegrationType: LEX_BOT
+      IntegrationArn: !GetAtt BotAlias.Arn
+
+Outputs:
+  AssistantArn:
+    Value: !GetAtt Assistant.AssistantArn
+  AssistantId:
+    Value: !GetAtt Assistant.AssistantId
+  KnowledgeBaseId:
+    Value: !GetAtt KnowledgeBase.KnowledgeBaseId
+  BotAliasArn:
+    Value: !GetAtt BotAlias.Arn

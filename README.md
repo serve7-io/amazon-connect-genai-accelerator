@@ -45,6 +45,13 @@ for s in stacks/*/; do terraform -chdir=$s init -backend=false && terraform -chd
 cfn-lint bootstrap/bootstrap.yaml
 ```
 
+## Self-service (Amazon Q in Connect)
+Layer 40 also deploys `modules/qic-selfservice/template.yaml` (CloudFormation, validated with cfn-lint):
+Q in Connect assistant + custom knowledge base + Lex V2 bot with `AMAZON.QinConnectIntent` + Connect integrations.
+`deploy.sh` then uploads `tenants/<tenant>/knowledge/*` with `scripts/sync-knowledge.py`, and validates the
+rendered flow with `scripts/validate-flow.py` before layer 30 (shows Connect's real problem list).
+Disable per tenant with `enable_self_service = false`.
+
 ## Not in this cut yet
-Lex V2 bot + Q in Connect (layer 40 phase 2), post-contact summary Lambda, VPC for Lambdas,
+Agentic (orchestrator + MCP tools) self-service, post-contact summary Lambda, VPC for Lambdas,
 GitHub Actions workflows, flow export script, competency evidence pack.

@@ -1,0 +1,23 @@
+Serve7 Sandbox - Demo Customer FAQ
+(Sample content for testing the Serve7 accelerator. Policies below are fictional demo values, not real Serve7 terms.)
+
+Opening hours
+Our contact centre is open Monday to Friday from 8:00 to 20:00 and Saturday from 9:00 to 17:00, Eastern Time (Toronto). We are closed on Sundays and statutory holidays. Chat with our automated assistant is available 24/7.
+
+Returns and refunds
+You can return any product within 30 days of delivery for a full refund, as long as it is unused and in its original packaging. Start a return from the Orders page in your account. Refunds go back to the original payment method within 5 to 7 business days after we receive the item. Digital subscriptions can be cancelled within 14 days for a full refund.
+
+Billing and invoices
+Invoices are issued on the 1st of every month and are available under Billing in your account. We accept Visa, Mastercard, American Express and pre-authorised debit. If you were charged twice, the duplicate charge is usually a pending authorisation that disappears within 3 business days; if it does not, ask for an agent and we will refund it. Late payments are charged a fee of 5 dollars after 15 days.
+
+Changing your plan
+You can upgrade your plan at any time and the change takes effect immediately; we charge the difference pro rata. Downgrades take effect at the start of your next billing cycle. Plans: Basic (19 dollars per month, 1 user), Team (49 dollars per month, up to 5 users), Business (99 dollars per month, up to 20 users, priority support).
+
+Account and password
+To reset your password, choose "Forgot password" on the sign-in page and follow the link we email you; the link is valid for 30 minutes. To change the email address on your account, go to Profile, then Contact details. For security we cannot change account details over chat without verifying your identity, so ask for an agent if you are locked out.
+
+Technical support
+If your service is slow or keeps disconnecting, restart your router, wait two minutes, and test again. If the problem continues, ask for an agent and have your account number ready. Our status page lists any ongoing outages.
+
+Talking to a person
+You can ask for an agent at any time by typing "agent" or saying "speak to a person". Agents are available during opening hours.

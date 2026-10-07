@@ -71,6 +71,9 @@ for layer in $LAYERS; do
     -backend-config="bucket=${STATE_BUCKET}" \
     -backend-config="key=${layer}/terraform.tfstate" \
     -backend-config="region=${REGION}" >/dev/null
+  if [[ "$layer" == "30-routing" ]]; then
+    INSTANCE_ALIAS="$ALIAS" python3 "$ROOT/scripts/validate-flow.py" --tenant "$TENANT" --env "$ENVIRONMENT"
+  fi
   # -var only for variables the layer declares (Terraform rejects undeclared -var values).
   LAYER_VARS=()
   [[ "$layer" == "20-connect-core" ]] && LAYER_VARS+=(-var "instance_alias=${ALIAS}")
@@ -81,6 +84,10 @@ for layer in $LAYERS; do
     [[ "$answer" =~ ^[Yy]$ ]] || { echo "Stopped before ${layer}."; exit 0; }
   fi
   terraform -chdir="$dir" apply -input=false tfplan
+  if [[ "$layer" == "40-genai" ]]; then
+    say "Syncing knowledge base content"
+    python3 "$ROOT/scripts/sync-knowledge.py" --tenant "$TENANT" --env "$ENVIRONMENT" || echo "(knowledge sync skipped)"
+  fi
 done
 
 say "Done. Run the smoke tests:  python3 tests/smoke.py --tenant ${TENANT}"

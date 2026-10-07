@@ -136,6 +136,11 @@ resource "aws_connect_contact_flow" "inbound_main" {
     disclosure_text       = local.routing.messages.ai_disclosure
     closed_text           = local.routing.messages.closed
     failure_text          = local.routing.messages.failure
+    self_service          = try(local.g.lex_bot_alias_arn, "") != ""
+    qic_assistant_arn     = try(local.g.qic_assistant_arn, "")
+    lex_bot_alias_arn     = try(local.g.lex_bot_alias_arn, "")
+    self_service_prompt   = try(local.routing.messages.self_service_prompt, "How can I help you today?")
+    goodbye_text          = try(local.routing.messages.goodbye, "Thanks for contacting us. Goodbye.")
   })
   tags = { "serve7:component" = "contact-flow" }
 }
@@ -208,6 +213,11 @@ resource "aws_connect_user" "admin" {
   phone_config {
     phone_type  = "SOFT_PHONE"
     auto_accept = false
+  }
+
+  # The initial password lives in Secrets Manager; users reset it themselves after first login.
+  lifecycle {
+    ignore_changes = [password]
   }
 }
 

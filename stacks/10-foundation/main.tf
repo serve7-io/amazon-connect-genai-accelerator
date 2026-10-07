@@ -16,7 +16,7 @@ module "kms_data" {
   source             = "../../modules/kms-key"
   name               = "${local.prefix}-data"
   description        = "DynamoDB state tables, knowledge base, Lambda environment"
-  service_principals = ["wisdom.amazonaws.com", "app-integrations.amazonaws.com"]
+  service_principals = ["wisdom.amazonaws.com", "app-integrations.amazonaws.com", "connect.amazonaws.com"]
 }
 
 module "kms_logs" {
