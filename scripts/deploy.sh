@@ -38,14 +38,20 @@ say "Tenant ${TENANT}/${ENVIRONMENT} -> account ${ACCOUNT}, region ${REGION}"
 if [[ -z "${ONLY:-}" && "${PLAN_ONLY:-0}" != "1" ]]; then
   if ! aws cloudformation describe-stacks --stack-name serve7-bootstrap >/dev/null 2>&1 || [[ "${REBOOTSTRAP:-0}" == "1" ]]; then
     say "Deploying bootstrap stack (OIDC trust, deploy/plan roles, boundary, state bucket, CloudTrail)"
-    OIDC=true
-    aws iam list-open-id-connect-providers --query 'OpenIDConnectProviderList[].Arn' --output text | grep -q token.actions.githubusercontent.com && OIDC=false
+    # Decide CreateOidcProvider only on first creation; on REBOOTSTRAP keep the stack's own value,
+    # otherwise the stack-owned provider would be seen as "external" and deleted.
+    OIDC_ARG=()
+    if ! aws cloudformation describe-stacks --stack-name serve7-bootstrap >/dev/null 2>&1; then
+      OIDC=true
+      aws iam list-open-id-connect-providers --query 'OpenIDConnectProviderList[].Arn' --output text | grep -q token.actions.githubusercontent.com && OIDC=false
+      OIDC_ARG=(CreateOidcProvider="$OIDC")
+    fi
     TRAIL="${CREATE_TRAIL:-true}"
     aws cloudformation deploy \
       --stack-name serve7-bootstrap \
       --template-file "$ROOT/bootstrap/bootstrap.yaml" \
       --capabilities CAPABILITY_NAMED_IAM \
-      --parameter-overrides Tenant="$TENANT" Environment="$ENVIRONMENT" CreateOidcProvider="$OIDC" CreateCloudTrail="$TRAIL" \
+      --parameter-overrides Tenant="$TENANT" Environment="$ENVIRONMENT" "${OIDC_ARG[@]}" CreateCloudTrail="$TRAIL" \
       --no-fail-on-empty-changeset
   else
     say "Bootstrap stack already present"
