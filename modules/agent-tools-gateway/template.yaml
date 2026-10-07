@@ -65,6 +65,15 @@ Resources:
         - UseJwt
         - CustomJWTAuthorizer:
             DiscoveryUrl: !Ref JwtDiscoveryUrl
+            # AgentCore requires at least one claim rule. Pin the issuer to this Connect instance
+            # (the discovery URL already restricts signing keys to it).
+            CustomClaims:
+              - InboundTokenClaimName: iss
+                InboundTokenClaimValueType: STRING
+                AuthorizingClaimMatchValue:
+                  ClaimMatchOperator: EQUALS
+                  ClaimMatchValue:
+                    MatchValueString: !Select [0, !Split ["/.well-known", !Ref JwtDiscoveryUrl]]
         - !Ref AWS::NoValue
       RoleArn: !GetAtt GatewayRole.Arn
 
