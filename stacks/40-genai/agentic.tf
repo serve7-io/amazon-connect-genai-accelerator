@@ -8,7 +8,7 @@ variable "enable_agentic_tools" {
 }
 
 variable "demo_crm_file" {
-  description = "JSON seed file with fictional customers (sandbox). Empty = table created without seed data."
+  description = "Seed file with fictional customers (sandbox), loaded by scripts/seed-demo-crm.py after this layer."
   type        = string
   default     = ""
 }
@@ -20,23 +20,7 @@ variable "agent_gateway_authorizer" {
 }
 
 locals {
-  agentic   = var.enable_agentic_tools
-  demo_crm  = local.agentic && var.demo_crm_file != "" ? jsondecode(file(var.demo_crm_file)).customers : []
-  crm_items = merge(
-    { for c in local.demo_crm : "${c.customer_id}/PROFILE" => {
-      pk = "CUST#${c.customer_id}", sk = "PROFILE",
-      attrs = { first_name = c.first_name, last_name = c.last_name, tier = c.tier, phone = c.phone, email = c.email }
-    } },
-    { for c in local.demo_crm : "${c.customer_id}/PHONE" => {
-      pk = "PHONE#${c.phone}", sk = "ALIAS", attrs = { customer_id = c.customer_id }
-    } },
-    { for c in local.demo_crm : "${c.customer_id}/EMAIL" => {
-      pk = "EMAIL#${lower(c.email)}", sk = "ALIAS", attrs = { customer_id = c.customer_id }
-    } },
-    merge([for c in local.demo_crm : { for o in c.orders : "${c.customer_id}/ORDER/${o.order_id}" => {
-      pk = "CUST#${c.customer_id}", sk = "ORDER#${o.order_id}", attrs = { item = o.item, status = o.status, eta = o.eta }
-    } }]...)
-  )
+  agentic = var.enable_agentic_tools
 }
 
 resource "aws_dynamodb_table" "crm" {
@@ -67,16 +51,13 @@ resource "aws_dynamodb_table" "crm" {
   tags = { "serve7:component" = "agent-tools-crm" }
 }
 
-# Seed rows are created once; tickets the agent creates later are not managed by Terraform.
-resource "aws_dynamodb_table_item" "crm_seed" {
-  for_each   = local.crm_items
-  table_name = aws_dynamodb_table.crm[0].name
-  hash_key   = "pk"
-  range_key  = "sk"
-  item = jsonencode(merge(
-    { pk = { S = each.value.pk }, sk = { S = each.value.sk } },
-    { for k, v in each.value.attrs : k => { S = v } }
-  ))
+# Demo rows are seeded by scripts/seed-demo-crm.py (run by deploy.sh), not managed by Terraform:
+# reading CMK-encrypted items would force the read-only plan role to decrypt customer data.
+removed {
+  from = aws_dynamodb_table_item.crm_seed
+  lifecycle {
+    destroy = false
+  }
 }
 
 data "aws_iam_policy_document" "agent_tools" {

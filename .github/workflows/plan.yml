@@ -36,8 +36,7 @@ jobs:
       - name: Resolve tenant
         id: t
         run: |
-          echo "account=$(grep -E '^account_id:' tenants/${{ matrix.tenant }}/tenant.yaml | awk '{print $2}' | tr -d '\"')" >> "$GITHUB_OUTPUT"
-          echo "region=$(grep -E '^region:' tenants/${{ matrix.tenant }}/tenant.yaml | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+          python scripts/tenant-info.py ${{ matrix.tenant }} ${{ matrix.env }} --github >> "$GITHUB_OUTPUT"
 
       - uses: aws-actions/configure-aws-credentials@v6
         with:

@@ -6,10 +6,12 @@ TENANT="${1:?usage: destroy.sh <tenant> <env>}"
 ENVIRONMENT="${2:?usage: destroy.sh <tenant> <env>}"
 [[ "$ENVIRONMENT" == "prod" ]] && { echo "Refusing to destroy prod."; exit 1; }
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-REGION="$(grep -E '^region:' "$ROOT/tenants/$TENANT/tenant.yaml" | awk '{print $2}')"
+TI() { python3 "$ROOT/scripts/tenant-info.py" "$TENANT" "$ENVIRONMENT" "$1"; }
+REGION="$(TI region)"
 export AWS_REGION="$REGION" AWS_DEFAULT_REGION="$REGION" PATH="$HOME/bin:$PATH"
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
 STATE_BUCKET="serve7-tfstate-${ACCOUNT}-${REGION}"
+[[ "$ACCOUNT" == "$(TI account_id)" ]] || { echo "Credentials are for $ACCOUNT, tenant expects $(TI account_id)."; exit 1; }
 
 read -r -p "Destroy ALL layers of ${TENANT}/${ENVIRONMENT} in ${ACCOUNT}? Type the tenant name to confirm: " answer
 [[ "$answer" == "$TENANT" ]] || { echo "Aborted."; exit 1; }
@@ -18,7 +20,7 @@ export TF_PLUGIN_CACHE_DIR=/tmp/tf-plugin-cache; mkdir -p "$TF_PLUGIN_CACHE_DIR"
 for layer in 50-observability 30-routing 40-genai 20-connect-core 10-foundation; do
   export TF_DATA_DIR="/tmp/tfdata/$layer"
   LAYER_VARS=()
-  [[ "$layer" == "20-connect-core" ]] && LAYER_VARS+=(-var "instance_alias=${INSTANCE_ALIAS:-s7-${TENANT}-${ENVIRONMENT}-${ACCOUNT: -6}}")
+  [[ "$layer" == "20-connect-core" ]] && LAYER_VARS+=(-var "instance_alias=${INSTANCE_ALIAS:-$(TI instance_alias)}")
   echo "==> destroying ${layer}"
   dir="$ROOT/stacks/$layer"
   terraform -chdir="$dir" init -input=false -reconfigure \

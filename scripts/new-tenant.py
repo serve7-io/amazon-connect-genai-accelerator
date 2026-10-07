@@ -42,6 +42,7 @@ def main() -> None:
     ap.add_argument("--country", default="CA")
     ap.add_argument("--cost-center", default="CC-SERVE7-DELIVERY")
     ap.add_argument("--industry", default="unspecified")
+    ap.add_argument("--prod-account-id", help="separate production account; also generates prod.tfvars")
     a = ap.parse_args()
 
     if not TENANT_RE.match(a.tenant):
@@ -53,6 +54,11 @@ def main() -> None:
     if "@" not in a.owner_email:
         fail("--owner-email must be an email address")
     alias = a.alias or f"s7-{a.tenant}-{a.account_id[-6:]}"
+    prod_alias = ""
+    if a.prod_account_id:
+        if not re.fullmatch(r"\d{12}", a.prod_account_id) or a.prod_account_id == a.account_id:
+            fail("--prod-account-id must be 12 digits and differ from --account-id (one environment per account)")
+        prod_alias = f"s7-{a.tenant}-prod-{a.prod_account_id[-6:]}"
     if not ALIAS_RE.match(alias):
         fail(f"alias '{alias}' must be lowercase letters, digits and hyphens (max 62)")
 
@@ -60,29 +66,46 @@ def main() -> None:
     if dest.exists():
         fail(f"{dest.relative_to(ROOT)} already exists - refusing to overwrite")
     for t in (ROOT / "tenants").glob("*/tenant.yaml"):
-        if f'account_id: "{a.account_id}"' in t.read_text():
-            fail(f"account {a.account_id} is already used by {t.parent.name} (one Connect tenant per account)")
+        for acct in filter(None, (a.account_id, a.prod_account_id)):
+            if f'"{acct}"' in t.read_text():
+                fail(f"account {acct} is already used by {t.parent.name} (one Connect tenant per account)")
 
     values = {
         "TENANT": a.tenant, "ACCOUNT_ID": a.account_id, "REGION": a.region, "ALIAS": alias,
         "COMPANY": a.company, "COMPANY_SHORT": a.company.split()[0][:30], "OWNER_EMAIL": a.owner_email,
         "TIMEZONE": a.timezone, "COUNTRY": a.country.upper(), "COST_CENTER": a.cost_center,
         "INDUSTRY": a.industry, "DATE": dt.date.today().isoformat(),
+        "PROD_ACCOUNT_ID": a.prod_account_id or "", "PROD_ALIAS": prod_alias,
     }
     written = []
     for src in sorted(TEMPLATE.rglob("*")):
         if src.is_dir():
             continue
+        if src.name.endswith(".optional"):
+            if not a.prod_account_id:
+                continue
+            target_name = src.name[: -len(".optional")]
+        else:
+            target_name = src.name
         text = src.read_text()
         for k, v in values.items():
             text = text.replace("{{" + k + "}}", v)
         leftover = re.findall(r"\{\{[A-Z_]+\}\}", text)
         if leftover:
             fail(f"template {src.name} has unknown placeholders {leftover}")
-        out = dest / src.relative_to(TEMPLATE)
+        out = dest / src.relative_to(TEMPLATE).with_name(target_name)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(text)
         written.append(out.relative_to(ROOT))
+    if a.prod_account_id:
+        ty = dest / "tenant.yaml"
+        ty.write_text(ty.read_text() + f'''
+# Production lives in its own account (one environment per account).
+environments:
+  prod:
+    account_id: "{a.prod_account_id}"
+    instance_alias: {prod_alias}
+''')
 
     print(f"Created tenant '{a.tenant}' ({a.company}) for account {a.account_id} in {a.region}:")
     for w in written:
