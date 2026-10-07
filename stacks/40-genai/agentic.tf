@@ -20,11 +20,11 @@ variable "agent_gateway_authorizer" {
 }
 
 locals {
-  agentic   = var.enable_agentic_tools
-  demo_crm  = local.agentic && var.demo_crm_file != "" ? jsondecode(file(var.demo_crm_file)).customers : []
+  agentic  = var.enable_agentic_tools
+  demo_crm = local.agentic && var.demo_crm_file != "" ? jsondecode(file(var.demo_crm_file)).customers : []
   crm_items = merge(
     { for c in local.demo_crm : "${c.customer_id}/PROFILE" => {
-      pk = "CUST#${c.customer_id}", sk = "PROFILE",
+      pk    = "CUST#${c.customer_id}", sk = "PROFILE",
       attrs = { first_name = c.first_name, last_name = c.last_name, tier = c.tier, phone = c.phone, email = c.email }
     } },
     { for c in local.demo_crm : "${c.customer_id}/PHONE" => {
