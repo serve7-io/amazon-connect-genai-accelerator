@@ -16,5 +16,5 @@ model_preference:
   - amazon.nova-lite
   - amazon.nova-micro
 # Pin explicitly to skip discovery:
-# bedrock_model_id: ""
+bedrock_model_id: amazon.nova-lite   # ca. profile keeps inference in Canada; switch to Claude after Anthropic form
 baseline_kpis: {}

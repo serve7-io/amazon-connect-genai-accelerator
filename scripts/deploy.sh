@@ -54,7 +54,7 @@ fi
 
 # ------------------------------------------------------------------ pre-flight + model discovery
 say "Pre-flight"
-python3 "$ROOT/scripts/preflight.py" --tenant "$TENANT" --region "$REGION"
+python3 "$ROOT/scripts/preflight.py" --tenant "$TENANT" --region "$REGION" ${SKIP_MODEL_TEST:+--skip-invoke-test}
 
 # ------------------------------------------------------------------ layers
 EXTRA_VARS=(-var "state_bucket=${STATE_BUCKET}" -var "release=${RELEASE:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo manual)}")
