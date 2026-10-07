@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   Serve7 accelerator - Amazon Q in Connect self-service (knowledge-base answers) wired into Amazon Connect.
-  Assistant + custom knowledge base + Lex V2 bot with AMAZON.QinConnectIntent + Connect integrations.
+  Assistant + custom knowledge base + Lex V2 bot with AMAZON.QInConnectIntent + Connect integrations.
   Deployed by stacks/40-genai through aws_cloudformation_stack (validated with cfn-lint schemas).
 
 Parameters:
@@ -119,7 +119,7 @@ Resources:
           Intents:
             - Name: QInConnectIntent
               Description: Hands the conversation to Amazon Q in Connect
-              ParentIntentSignature: AMAZON.QinConnectIntent
+              ParentIntentSignature: AMAZON.QInConnectIntent
               QInConnectIntentConfiguration:
                 QInConnectAssistantConfiguration:
                   AssistantArn: !GetAtt Assistant.AssistantArn
