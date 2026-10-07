@@ -71,7 +71,8 @@
       "Type": "ConnectParticipantWithLexBot",
       "Parameters": {
         "Text": "${self_service_prompt}",
-        "LexV2Bot": { "AliasArn": "${lex_bot_alias_arn}" }
+        "LexV2Bot": { "AliasArn": "${lex_bot_alias_arn}" },
+        "LexSessionAttributes": { "x-amz-lex:q-in-connect:session-arn": "$.Wisdom.SessionArn" }
       },
       "Transitions": {
         "NextAction": "check-tool",
