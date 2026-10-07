@@ -438,6 +438,22 @@ Resources:
                     kms:ViaService:
                       - !Sub "bedrock.${AWS::Region}.amazonaws.com"
                       - !Sub "wisdom.${AWS::Region}.amazonaws.com"
+              - Sid: ReadNewerServiceConfig
+                # AWS ReadOnlyAccess lags newer services/actions (e.g. bedrock:ListTagsForResource); Terraform refresh needs them.
+                Effect: Allow
+                Action:
+                  - bedrock:Get*
+                  - bedrock:List*
+                  - bedrock-agentcore:Get*
+                  - bedrock-agentcore:List*
+                  - wisdom:Get*
+                  - wisdom:List*
+                  - lex:Describe*
+                  - lex:List*
+                  - connect:Describe*
+                  - connect:List*
+                  - connect:Get*
+                Resource: "*"
               - Sid: NoDataReads
                 Effect: Deny
                 Action: [s3:GetObject]
