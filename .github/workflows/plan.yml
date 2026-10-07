@@ -46,7 +46,7 @@ jobs:
           role-session-name: gh-plan-${{ github.run_id }}
 
       - name: Plan all layers (read-only)
-        run: PLAN_ONLY=1 ./scripts/deploy.sh ${{ matrix.tenant }} ${{ matrix.env }}
+        run: PLAN_ONLY=1 RELEASE=main ./scripts/deploy.sh ${{ matrix.tenant }} ${{ matrix.env }}
 
       - name: Summarise plan on the PR
         if: github.event_name == 'pull_request'
