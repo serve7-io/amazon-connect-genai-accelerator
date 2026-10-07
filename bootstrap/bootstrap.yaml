@@ -25,6 +25,12 @@ Parameters:
     Default: "true"
     AllowedValues: ["true", "false"]
     Description: Set to false if the account already has the token.actions.githubusercontent.com provider.
+  GitHubSubjectPrefix:
+    Type: String
+    Default: ""
+    Description: >-
+      OIDC sub prefix when the repo uses GitHub immutable subjects, e.g. repo:Owner@123/Repo@456
+      (gh api repos/OWNER/REPO/actions/oidc/customization/sub -> sub_claim_prefix). Empty = repo:GitHubOrg/GitHubRepo.
   DeployTrust:
     Type: String
     Default: environment
@@ -40,6 +46,7 @@ Conditions:
   MakeOidc: !Equals [!Ref CreateOidcProvider, "true"]
   MakeTrail: !Equals [!Ref CreateCloudTrail, "true"]
   TrustEnvironment: !Equals [!Ref DeployTrust, environment]
+  HasSubjectPrefix: !Not [!Equals [!Ref GitHubSubjectPrefix, ""]]
 
 Resources:
   # ---------------------------------------------------------------- KMS
@@ -312,8 +319,8 @@ Resources:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
                 token.actions.githubusercontent.com:sub: !If
                   - TrustEnvironment
-                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:environment:${Tenant}-${Environment}"
-                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main"
+                  - !Sub ["${P}:environment:${Tenant}-${Environment}", {P: !If [HasSubjectPrefix, !Ref GitHubSubjectPrefix, !Sub "repo:${GitHubOrg}/${GitHubRepo}"]}]
+                  - !Sub ["${P}:ref:refs/heads/main", {P: !If [HasSubjectPrefix, !Ref GitHubSubjectPrefix, !Sub "repo:${GitHubOrg}/${GitHubRepo}"]}]
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/PowerUserAccess"
       Policies:
@@ -401,9 +408,9 @@ Resources:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
                 token.actions.githubusercontent.com:sub:
-                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:pull_request"
-                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main"
-                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:environment:${Tenant}-${Environment}-plan"
+                  - !Sub ["${P}:pull_request", {P: !If [HasSubjectPrefix, !Ref GitHubSubjectPrefix, !Sub "repo:${GitHubOrg}/${GitHubRepo}"]}]
+                  - !Sub ["${P}:ref:refs/heads/main", {P: !If [HasSubjectPrefix, !Ref GitHubSubjectPrefix, !Sub "repo:${GitHubOrg}/${GitHubRepo}"]}]
+                  - !Sub ["${P}:environment:${Tenant}-${Environment}-plan", {P: !If [HasSubjectPrefix, !Ref GitHubSubjectPrefix, !Sub "repo:${GitHubOrg}/${GitHubRepo}"]}]
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/ReadOnlyAccess"
       Policies:
