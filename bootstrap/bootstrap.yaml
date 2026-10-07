@@ -408,6 +408,10 @@ Resources:
               - Effect: Allow
                 Action: [kms:Decrypt]
                 Resource: !GetAtt BootstrapKey.Arn
+              - Sid: RefreshGeneratedSecrets
+                Effect: Allow
+                Action: [secretsmanager:GetSecretValue]
+                Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:s7-*/connect-user/*"
               - Sid: NoDataReads
                 Effect: Deny
                 Action: [s3:GetObject]

@@ -28,14 +28,14 @@ if ! command -v terraform >/dev/null || ! terraform version | grep -q "v${TF_VER
   unzip -o -q /tmp/tf.zip -d "$HOME/bin"
   export PATH="$HOME/bin:$PATH"
 fi
-python3 -c "import boto3" 2>/dev/null || pip3 install --user -q boto3
+python3 -c "import boto3" 2>/dev/null || pip3 install --user -q boto3 || pip3 install -q boto3
 
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
 STATE_BUCKET="serve7-tfstate-${ACCOUNT}-${REGION}"
 say "Tenant ${TENANT}/${ENVIRONMENT} -> account ${ACCOUNT}, region ${REGION}"
 
 # ------------------------------------------------------------------ bootstrap (E1)
-if [[ -z "${ONLY:-}" ]]; then
+if [[ -z "${ONLY:-}" && "${PLAN_ONLY:-0}" != "1" ]]; then
   if ! aws cloudformation describe-stacks --stack-name serve7-bootstrap >/dev/null 2>&1 || [[ "${REBOOTSTRAP:-0}" == "1" ]]; then
     say "Deploying bootstrap stack (OIDC trust, deploy/plan roles, boundary, state bucket, CloudTrail)"
     OIDC=true
@@ -54,12 +54,14 @@ fi
 
 # ------------------------------------------------------------------ pre-flight + model discovery
 say "Pre-flight"
+[[ "${PLAN_ONLY:-0}" == "1" ]] && SKIP_MODEL_TEST=1
 python3 "$ROOT/scripts/preflight.py" --tenant "$TENANT" --region "$REGION" ${SKIP_MODEL_TEST:+--skip-invoke-test}
 
 # ------------------------------------------------------------------ layers
 EXTRA_VARS=(-var "state_bucket=${STATE_BUCKET}" -var "release=${RELEASE:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo manual)}")
 # Connect aliases are unique per region across all AWS customers: default to one derived from the account.
-ALIAS="${INSTANCE_ALIAS:-s7-${TENANT}-${ENVIRONMENT}-${ACCOUNT: -6}}"
+TENANT_ALIAS="$(grep -E '^instance_alias:' "$ROOT/tenants/$TENANT/tenant.yaml" | awk '{print $2}')"
+ALIAS="${INSTANCE_ALIAS:-${TENANT_ALIAS:-s7-${TENANT}-${ENVIRONMENT}-${ACCOUNT: -6}}}"
 
 # CloudShell home is 1 GB and the AWS provider is ~700 MB: keep providers and .terraform in /tmp, shared by all layers.
 export TF_PLUGIN_CACHE_DIR=/tmp/tf-plugin-cache; mkdir -p "$TF_PLUGIN_CACHE_DIR"
@@ -71,13 +73,22 @@ for layer in $LAYERS; do
     -backend-config="bucket=${STATE_BUCKET}" \
     -backend-config="key=${layer}/terraform.tfstate" \
     -backend-config="region=${REGION}" >/dev/null
-  if [[ "$layer" == "30-routing" ]]; then
+  if [[ "$layer" == "30-routing" && "${PLAN_ONLY:-0}" != "1" ]]; then
     INSTANCE_ALIAS="$ALIAS" python3 "$ROOT/scripts/validate-flow.py" --tenant "$TENANT" --env "$ENVIRONMENT"
   fi
   # -var only for variables the layer declares (Terraform rejects undeclared -var values).
   LAYER_VARS=()
   [[ "$layer" == "20-connect-core" ]] && LAYER_VARS+=(-var "instance_alias=${ALIAS}")
   [[ "$layer" == "30-routing" && -n "${CLAIM_PHONE:-}" ]] && LAYER_VARS+=(-var "claim_phone_number=${CLAIM_PHONE}")
+  if [[ "${PLAN_ONLY:-0}" == "1" ]]; then
+    # read-only role: no state lock, no apply
+    if ! terraform -chdir="$dir" plan -input=false -lock=false -var-file="$TFVARS" "${EXTRA_VARS[@]}" "${LAYER_VARS[@]}" \
+         -compact-warnings -no-color > "$ROOT/plan-${layer}.txt" 2>&1; then
+      cat "$ROOT/plan-${layer}.txt"; echo "Plan failed for ${layer}"; exit 1
+    fi
+    grep -E '^(Plan:|No changes)' "$ROOT/plan-${layer}.txt" || true
+    continue
+  fi
   terraform -chdir="$dir" plan -input=false -out=tfplan -var-file="$TFVARS" "${EXTRA_VARS[@]}" "${LAYER_VARS[@]}" -compact-warnings
   if [[ "${AUTO_APPROVE:-0}" != "1" ]]; then
     read -r -p "Apply ${layer}? [y/N] " answer

@@ -1,0 +1,72 @@
+name: validate
+# Static checks on every push and PR. No AWS access.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tools
+        run: pip install -q pytest boto3 cfn-lint checkov
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive stacks modules
+
+      - name: Terraform validate (every stack)
+        run: |
+          set -e
+          for s in stacks/*/; do
+            [ "$s" = "stacks/_shared/" ] && continue
+            echo "::group::$s"
+            terraform -chdir="$s" init -backend=false -input=false >/dev/null
+            terraform -chdir="$s" validate
+            echo "::endgroup::"
+          done
+
+      - name: CloudFormation lint
+        run: cfn-lint bootstrap/bootstrap.yaml modules/qic-selfservice/template.yaml
+
+      - name: Lambda unit tests
+        run: python -m pytest -q lambdas/genai_gateway/tests
+
+      - name: Flow template renders for every tenant
+        run: |
+          set -e
+          for t in tenants/*/; do
+            t=$(basename "$t"); [ "$t" = "_template" ] && continue
+            python - "$t" <<'PY'
+          import json, re, sys
+          t = open("flows/inbound-main.json.tftpl").read()
+          for ss in (True, False):
+              r = re.sub(r"%\{ if self_service \}(.*?)%\{ endif \}", (lambda m: m.group(1)) if ss else "", t, flags=re.S)
+              r = r.replace('${self_service ? "qic-session" : "classify"}', "qic-session" if ss else "classify")
+              r = r.replace("${recorded_participants}", '["Agent"]')
+              r = re.sub(r"\$\{(\w+)\}", "X", r)
+              d = json.loads(r)
+              ids = {a["Identifier"] for a in d["Actions"]}
+              nxt = set()
+              for a in d["Actions"]:
+                  tr = a["Transitions"]
+                  nxt |= {tr.get("NextAction")} | {c["NextAction"] for c in tr.get("Conditions", [])} | {e["NextAction"] for e in tr.get("Errors", [])}
+              nxt.discard(None)
+              assert not (nxt - ids), f"dangling transitions: {nxt - ids}"
+          print(sys.argv[1], "flow template OK")
+          PY
+          done
+
+      - name: Checkov (report only for now)
+        run: checkov -d stacks -d modules --framework terraform --quiet --compact --soft-fail

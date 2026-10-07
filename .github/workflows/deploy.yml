@@ -1,0 +1,67 @@
+name: deploy
+# Deploys a tenant with the serve7-deploy role (OIDC, bound to the GitHub environment <tenant>-<env>),
+# then runs the smoke tests. Runs on merge to main for the sandbox, or manually for any tenant.
+on:
+  push:
+    branches: [main]
+    paths: ["stacks/**", "modules/**", "flows/**", "lambdas/**", "tenants/**", "scripts/**", "bootstrap/**"]
+  workflow_dispatch:
+    inputs:
+      tenant:
+        description: Tenant folder under tenants/
+        default: sandbox
+        required: true
+      env:
+        description: Environment
+        type: choice
+        options: [dev, test, prod]
+        default: dev
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.tenant || 'sandbox' }}-${{ inputs.env || 'dev' }}
+  cancel-in-progress: false   # never interrupt an apply
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.tenant || 'sandbox' }}-${{ inputs.env || 'dev' }}   # prod environments require reviewers
+    env:
+      TENANT: ${{ inputs.tenant || 'sandbox' }}
+      ENVIRONMENT: ${{ inputs.env || 'dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q boto3 pytest
+
+      - name: Unit tests gate
+        run: python -m pytest -q lambdas/genai_gateway/tests
+
+      - name: Resolve tenant
+        id: t
+        run: |
+          echo "account=$(grep -E '^account_id:' tenants/$TENANT/tenant.yaml | awk '{print $2}' | tr -d '\"')" >> "$GITHUB_OUTPUT"
+          echo "region=$(grep -E '^region:' tenants/$TENANT/tenant.yaml | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ steps.t.outputs.account }}:role/serve7-deploy
+          aws-region: ${{ steps.t.outputs.region }}
+          role-session-name: gh-deploy-${{ github.run_id }}
+          role-duration-seconds: 7200
+
+      - name: Deploy all layers
+        run: AUTO_APPROVE=1 RELEASE=${GITHUB_REF_NAME} ./scripts/deploy.sh "$TENANT" "$ENVIRONMENT"   # main or a release tag; stable so tags do not churn
+
+      - name: Smoke tests
+        # phone: quota-dependent; chat: API chats never subscribe a websocket (covered by the qic check)
+        run: SMOKE_SKIP=phone,chat python tests/smoke.py --tenant "$TENANT" --env "$ENVIRONMENT"

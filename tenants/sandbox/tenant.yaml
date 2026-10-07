@@ -1,9 +1,9 @@
 # Sandbox tenant - Serve7's own account for building and demoing the accelerator.
 tenant: sandbox
 environment: dev
-account_id: "000000000000"   # TODO: replace with the sandbox account ID
+account_id: "872376836480"
 region: ca-central-1
-instance_alias: serve7-sandbox-dev   # must be unique in the region; change if taken
+instance_alias: serve7-calgary-demo   # adopted existing instance (account quota = 1)
 cost_center: CC-SERVE7-RND
 owner: cx-platform@serve7.io
 industry: internal

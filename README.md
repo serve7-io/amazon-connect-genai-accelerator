@@ -38,6 +38,16 @@ Options: `CLAIM_PHONE=false` (skip the phone number), `INSTANCE_ALIAS=my-alias`,
 `preflight.py` picks the first invokable model from `model_preference` in `tenant.yaml`.
 Anthropic models need the one-time use-case form in the Bedrock console; Amazon Nova works without it.
 
+## CI/CD (GitHub Actions)
+| Workflow | Trigger | AWS role | Does |
+|---|---|---|---|
+| `validate.yml` | every push / PR | none | fmt, validate, cfn-lint, unit tests, flow-graph check, Checkov (report only) |
+| `plan.yml` | PR touching infra | `serve7-plan` (read-only, OIDC) | plans every layer, comments the summary on the PR |
+| `deploy.yml` | merge to `main` / manual | `serve7-deploy` (OIDC, GitHub environment `<tenant>-<env>`) | applies all layers, syncs knowledge, runs smoke tests |
+
+One-time GitHub setup: create environment `sandbox-dev` (Settings → Environments); add required reviewers for `*-prod`.
+The OIDC trust in `bootstrap.yaml` only accepts that environment for deploys.
+
 ## Local checks
 ```bash
 python3 -m pytest -q lambdas/genai_gateway/tests

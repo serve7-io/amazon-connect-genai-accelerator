@@ -1,0 +1,71 @@
+name: plan
+# Terraform plan for the sandbox tenant on every PR, with the read-only serve7-plan role (OIDC).
+on:
+  pull_request:
+    paths: ["stacks/**", "modules/**", "flows/**", "lambdas/**", "tenants/**", "scripts/**"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: plan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - tenant: sandbox
+            env: dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q boto3
+
+      - name: Resolve tenant
+        id: t
+        run: |
+          echo "account=$(grep -E '^account_id:' tenants/${{ matrix.tenant }}/tenant.yaml | awk '{print $2}' | tr -d '\"')" >> "$GITHUB_OUTPUT"
+          echo "region=$(grep -E '^region:' tenants/${{ matrix.tenant }}/tenant.yaml | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ steps.t.outputs.account }}:role/serve7-plan
+          aws-region: ${{ steps.t.outputs.region }}
+          role-session-name: gh-plan-${{ github.run_id }}
+
+      - name: Plan all layers (read-only)
+        run: PLAN_ONLY=1 ./scripts/deploy.sh ${{ matrix.tenant }} ${{ matrix.env }}
+
+      - name: Summarise plan on the PR
+        if: github.event_name == 'pull_request'
+        run: |
+          {
+            echo "### Terraform plan: ${{ matrix.tenant }}/${{ matrix.env }}"
+            for f in plan-*.txt; do
+              echo "- **${f#plan-}**: $(grep -E '^(Plan:|No changes)' "$f" | head -1)"
+            done
+          } > summary.md
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+          gh pr comment ${{ github.event.pull_request.number }} --body-file summary.md --edit-last || \
+            gh pr comment ${{ github.event.pull_request.number }} --body-file summary.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plan-${{ matrix.tenant }}-${{ matrix.env }}
+          path: plan-*.txt
+          retention-days: 30

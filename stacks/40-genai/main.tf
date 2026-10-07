@@ -174,7 +174,7 @@ resource "aws_bedrock_guardrail" "this" {
 
 resource "aws_bedrock_guardrail_version" "this" {
   guardrail_arn = aws_bedrock_guardrail.this.guardrail_arn
-  description   = "release ${var.release}"
+  description   = "Managed by Terraform"
   skip_destroy  = true
 
   lifecycle {

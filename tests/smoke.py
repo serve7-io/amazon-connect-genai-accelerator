@@ -19,10 +19,20 @@ ROOT = Path(__file__).resolve().parents[1]
 RESULTS: list[tuple[str, bool, str]] = []
 
 
+SKIP = {x.strip() for x in os.environ.get("SMOKE_SKIP", "").split(",") if x.strip()}
+
+
 def check(name: str, passed: bool, detail: str = "") -> bool:
     RESULTS.append((name, passed, detail))
     print(f"  [{'PASS' if passed else 'FAIL'}] {name}{' - ' + detail if detail else ''}")
     return passed
+
+
+def tenant_value(tenant: str, key: str) -> str:
+    for line in (ROOT / "tenants" / tenant / "tenant.yaml").read_text().splitlines():
+        if line.startswith(f"{key}:"):
+            return line.split(":", 1)[1].split("#")[0].strip().strip('"')
+    return ""
 
 
 def region_of(tenant: str) -> str:
@@ -46,7 +56,7 @@ def main() -> None:
 
     # ------------------------------------------------------------ instance
     instances = connect.list_instances()["InstanceSummaryList"]
-    inst = next((i for i in instances if i.get("InstanceAlias", "") == os.environ.get("INSTANCE_ALIAS") or i.get("InstanceAlias", "").startswith(prefix)), None)
+    inst = next((i for i in instances if i.get("InstanceAlias", "") == (os.environ.get("INSTANCE_ALIAS") or tenant_value(args.tenant, "instance_alias")) or i.get("InstanceAlias", "").startswith(prefix)), None)
     if not check("Connect instance exists", inst is not None, inst["InstanceAlias"] if inst else "not found"):
         return finish()
     check("Connect instance ACTIVE", inst["InstanceStatus"] == "ACTIVE", inst["InstanceStatus"])
@@ -67,7 +77,8 @@ def main() -> None:
         check("No unresolved template placeholders", "${" not in desc["Content"])
 
     numbers = connect.list_phone_numbers_v2(TargetArn=inst["Arn"]).get("ListPhoneNumbersSummaryList", [])
-    check("Phone number claimed", bool(numbers), ", ".join(n["PhoneNumber"] for n in numbers) or "none (CLAIM_PHONE=false?)")
+    if "phone" not in SKIP:
+        check("Phone number claimed", bool(numbers), ", ".join(n["PhoneNumber"] for n in numbers) or "none (CLAIM_PHONE=false?)")
 
     # ------------------------------------------------------------ gateway Lambda
     fn = f"{prefix}-genai-gateway"
@@ -102,8 +113,24 @@ def main() -> None:
     except ClientError as err:
         check("Contact state written to DynamoDB", False, err.response["Error"]["Code"])
 
+    # ------------------------------------------------------------ Q in Connect self-service through Lex
+    if "qic" not in SKIP:
+        try:
+            lex = s.client("lexv2-models")
+            bot = next((b for b in lex.list_bots()["botSummaries"] if b["botName"] == f"{prefix}-selfservice"), None)
+            if bot:
+                alias = next(a for a in lex.list_bot_aliases(botId=bot["botId"])["botAliasSummaries"] if a["botAliasName"] == "live")
+                r = s.client("lexv2-runtime").recognize_text(botId=bot["botId"], botAliasId=alias["botAliasId"], localeId="en_US",
+                                                            sessionId=f"smoke-{int(time.time())}", text="What are your opening hours on Saturday?")
+                answer = r.get("sessionState", {}).get("sessionAttributes", {}).get("x-amz-lex:q-in-connect-response", "")
+                check("Q in Connect answers from the knowledge base", bool(answer), answer[:160])
+            else:
+                check("Q in Connect answers from the knowledge base", False, "self-service bot not found")
+        except ClientError as err:
+            check("Q in Connect answers from the knowledge base", False, err.response["Error"]["Message"][:200])
+
     # ------------------------------------------------------------ chat end-to-end through the flow
-    if flow:
+    if flow and "chat" not in SKIP:
         try:
             chat = connect.start_chat_contact(
                 InstanceId=iid, ContactFlowId=flow["Id"],
