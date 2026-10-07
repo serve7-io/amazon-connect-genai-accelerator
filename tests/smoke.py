@@ -111,6 +111,9 @@ def main() -> None:
                 Attributes={"utterance": "I was charged twice on my last invoice"},
             )
             cid = chat["ContactId"]
+            # Chat flows only start running once the customer participant connects.
+            boto3.client("connectparticipant", region_name=region).create_participant_connection(
+                Type=["CONNECTION_CREDENTIALS"], ParticipantToken=chat["ParticipantToken"], ConnectParticipant=True)
             attrs = {}
             for _ in range(10):
                 time.sleep(2)
@@ -119,7 +122,13 @@ def main() -> None:
                     break
             check("Chat through inbound flow sets AI attributes", attrs.get("intent") == "billing",
                   json.dumps({k: attrs.get(k) for k in ("intent", "route_hint", "guardrail_action", "ai_disclosed")}))
-            connect.stop_contact(InstanceId=iid, ContactId=cid)
+            if attrs.get("intent") != "billing":
+                d = connect.describe_contact(InstanceId=iid, ContactId=cid)["Contact"]
+                print("         contact:", json.dumps({k: d.get(k) for k in ("Channel", "InitiationMethod", "DisconnectReason", "QueueInfo")}, default=str))
+            try:
+                connect.stop_contact(InstanceId=iid, ContactId=cid)
+            except ClientError:
+                pass  # already ended by the flow
         except ClientError as err:
             check("Chat through inbound flow sets AI attributes", False, err.response["Error"]["Message"][:200])
 
