@@ -14,7 +14,9 @@ STATE_BUCKET="serve7-tfstate-${ACCOUNT}-${REGION}"
 read -r -p "Destroy ALL layers of ${TENANT}/${ENVIRONMENT} in ${ACCOUNT}? Type the tenant name to confirm: " answer
 [[ "$answer" == "$TENANT" ]] || { echo "Aborted."; exit 1; }
 
+export TF_PLUGIN_CACHE_DIR=/tmp/tf-plugin-cache; mkdir -p "$TF_PLUGIN_CACHE_DIR"
 for layer in 50-observability 30-routing 40-genai 20-connect-core 10-foundation; do
+  export TF_DATA_DIR="/tmp/tfdata/$layer"
   echo "==> destroying ${layer}"
   dir="$ROOT/stacks/$layer"
   terraform -chdir="$dir" init -input=false -reconfigure \

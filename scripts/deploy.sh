@@ -62,7 +62,10 @@ EXTRA_VARS=(-var "state_bucket=${STATE_BUCKET}" -var "release=${RELEASE:-$(git -
 EXTRA_VARS+=(-var "instance_alias=${INSTANCE_ALIAS:-s7-${TENANT}-${ENVIRONMENT}-${ACCOUNT: -6}}")
 [[ -n "${CLAIM_PHONE:-}" ]] && EXTRA_VARS+=(-var "claim_phone_number=${CLAIM_PHONE}")
 
+# CloudShell home is 1 GB and the AWS provider is ~700 MB: keep providers and .terraform in /tmp, shared by all layers.
+export TF_PLUGIN_CACHE_DIR=/tmp/tf-plugin-cache; mkdir -p "$TF_PLUGIN_CACHE_DIR"
 for layer in $LAYERS; do
+  export TF_DATA_DIR="/tmp/tfdata/$layer"
   say "Layer ${layer}"
   dir="$ROOT/stacks/$layer"
   terraform -chdir="$dir" init -input=false -reconfigure \
