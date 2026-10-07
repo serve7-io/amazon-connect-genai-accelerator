@@ -428,6 +428,16 @@ Resources:
                 Effect: Allow
                 Action: [secretsmanager:GetSecretValue]
                 Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:s7-*/connect-user/*"
+              - Sid: ReadCmkEncryptedConfig
+                # Guardrails and Q in Connect resources are encrypted with tenant CMKs; reading them in plan needs Decrypt.
+                Effect: Allow
+                Action: [kms:Decrypt, kms:DescribeKey]
+                Resource: !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+                Condition:
+                  StringEquals:
+                    kms:ViaService:
+                      - !Sub "bedrock.${AWS::Region}.amazonaws.com"
+                      - !Sub "wisdom.${AWS::Region}.amazonaws.com"
               - Sid: NoDataReads
                 Effect: Deny
                 Action: [s3:GetObject]
