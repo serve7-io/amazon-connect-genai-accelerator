@@ -9,7 +9,8 @@ data_classification = "internal"
 recording_retention_days = 90
 
 # 20-connect-core
-instance_alias = "serve7-sandbox-dev"
+instance_alias      = "serve7-sandbox-dev"
+kinesis_stream_mode = "PROVISIONED" # sandbox: fixed 1 shard instead of on-demand
 
 # 40-genai: bedrock_model_id / bedrock_resource_arns are written by scripts/preflight.py
 # into stacks/40-genai/models.auto.tfvars.json at deploy time.

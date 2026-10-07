@@ -14,6 +14,16 @@ data "terraform_remote_state" "foundation" {
   }
 }
 
+variable "kinesis_stream_mode" {
+  description = "PROVISIONED (1 shard, ~$0.40/day per stream) for sandboxes; ON_DEMAND for production traffic."
+  type        = string
+  default     = "ON_DEMAND"
+  validation {
+    condition     = contains(["ON_DEMAND", "PROVISIONED"], var.kinesis_stream_mode)
+    error_message = "kinesis_stream_mode must be ON_DEMAND or PROVISIONED."
+  }
+}
+
 variable "instance_alias" {
   description = "Globally unique within the region; becomes https://<alias>.my.connect.aws"
   type        = string
@@ -89,10 +99,11 @@ resource "aws_connect_instance_storage_config" "scheduled_reports" {
 resource "aws_kinesis_stream" "ctr" {
   name             = "${local.prefix}-ctr"
   retention_period = 24
+  shard_count      = var.kinesis_stream_mode == "PROVISIONED" ? 1 : null
   encryption_type  = "KMS"
   kms_key_id       = local.f.kms_connect_arn
   stream_mode_details {
-    stream_mode = "ON_DEMAND"
+    stream_mode = var.kinesis_stream_mode
   }
   tags = { "serve7:component" = "ctr-stream" }
 }
@@ -100,10 +111,11 @@ resource "aws_kinesis_stream" "ctr" {
 resource "aws_kinesis_stream" "agent_events" {
   name             = "${local.prefix}-agent-events"
   retention_period = 24
+  shard_count      = var.kinesis_stream_mode == "PROVISIONED" ? 1 : null
   encryption_type  = "KMS"
   kms_key_id       = local.f.kms_connect_arn
   stream_mode_details {
-    stream_mode = "ON_DEMAND"
+    stream_mode = var.kinesis_stream_mode
   }
   tags = { "serve7:component" = "agent-event-stream" }
 }
