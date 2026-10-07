@@ -27,18 +27,18 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: ${{ vars.USE_ENVIRONMENTS != 'false' && format('{0}-{1}', inputs.tenant || 'sandbox', inputs.env || 'dev') || '' }}
     env:
       TENANT: ${{ inputs.tenant || 'sandbox' }}
       ENVIRONMENT: ${{ inputs.env || 'dev' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.10.5
           terraform_wrapper: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install -q boto3 pytest pyyaml
@@ -52,7 +52,7 @@ jobs:
           echo "account=$(grep -E '^account_id:' tenants/$TENANT/tenant.yaml | awk '{print $2}' | tr -d '\"')" >> "$GITHUB_OUTPUT"
           echo "region=$(grep -E '^region:' tenants/$TENANT/tenant.yaml | awk '{print $2}')" >> "$GITHUB_OUTPUT"
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::${{ steps.t.outputs.account }}:role/serve7-deploy
           aws-region: ${{ steps.t.outputs.region }}
