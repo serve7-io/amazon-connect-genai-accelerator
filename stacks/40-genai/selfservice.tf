@@ -33,6 +33,12 @@ resource "aws_cloudformation_stack" "self_service" {
     create = "30m"
     update = "30m"
   }
+
+  # Stack tags propagate to every resource inside; Wisdom associations and Connect integration
+  # associations cannot be updated in place, so a changing serve7:release tag breaks the stack.
+  lifecycle {
+    ignore_changes = [tags, tags_all]
+  }
 }
 
 output "qic_assistant_arn" {
