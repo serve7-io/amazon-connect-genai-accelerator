@@ -16,9 +16,18 @@ Parameters:
     Default: /serve7/workload/
   AuthorizerType:
     Type: String
-    Default: AWS_IAM
+    Default: CUSTOM_JWT
     AllowedValues: [AWS_IAM, CUSTOM_JWT]
-    Description: How callers (Amazon Connect / Q in Connect) authenticate to the gateway.
+    Description: >-
+      How callers authenticate. Amazon Connect AI agents present JWTs issued by the instance, so
+      Connect needs CUSTOM_JWT with the instance discovery URL.
+  JwtDiscoveryUrl:
+    Type: String
+    Default: ""
+    Description: OIDC discovery URL, e.g. https://<alias>.my.connect.aws/.well-known/openid-configuration
+
+Conditions:
+  UseJwt: !Equals [!Ref AuthorizerType, CUSTOM_JWT]
 
 Resources:
   GatewayRole:
@@ -52,6 +61,11 @@ Resources:
       Description: Serve7 CRM tools for the Q in Connect orchestration agent
       ProtocolType: MCP
       AuthorizerType: !Ref AuthorizerType
+      AuthorizerConfiguration: !If
+        - UseJwt
+        - CustomJWTAuthorizer:
+            DiscoveryUrl: !Ref JwtDiscoveryUrl
+        - !Ref AWS::NoValue
       RoleArn: !GetAtt GatewayRole.Arn
 
   CrmTarget:

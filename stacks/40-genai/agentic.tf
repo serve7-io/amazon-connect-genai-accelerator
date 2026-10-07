@@ -14,8 +14,9 @@ variable "demo_crm_file" {
 }
 
 variable "agent_gateway_authorizer" {
-  type    = string
-  default = "AWS_IAM"
+  description = "CUSTOM_JWT = Amazon Connect AI agents call the gateway with instance-issued JWTs."
+  type        = string
+  default     = "CUSTOM_JWT"
 }
 
 locals {
@@ -129,6 +130,8 @@ resource "aws_cloudformation_stack" "agent_tools_gateway" {
     PermissionsBoundaryArn = local.boundary_arn
     RolePath               = var.workload_role_path
     AuthorizerType         = var.agent_gateway_authorizer
+    # Connect instance OIDC issuer: only tokens signed by this instance are accepted.
+    JwtDiscoveryUrl = "${local.c.access_url}/.well-known/openid-configuration"
   }
 
   tags = { "serve7:component" = "agent-tools-gateway", "serve7:genai" = "agentic" }
