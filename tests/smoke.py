@@ -52,7 +52,7 @@ def main() -> None:
     check("Connect instance ACTIVE", inst["InstanceStatus"] == "ACTIVE", inst["InstanceStatus"])
     iid = inst["Id"]
 
-    storage = {c["StorageConfig"]["StorageType"] + ":" + rt
+    storage = {c["StorageType"] + ":" + rt
                for rt in ["CALL_RECORDINGS", "CHAT_TRANSCRIPTS", "CONTACT_TRACE_RECORDS"]
                for c in connect.list_instance_storage_configs(InstanceId=iid, ResourceType=rt)["StorageConfigs"]}
     check("Recording, transcript and CTR storage configured", len(storage) == 3, ", ".join(sorted(storage)))
