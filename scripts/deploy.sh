@@ -59,8 +59,7 @@ python3 "$ROOT/scripts/preflight.py" --tenant "$TENANT" --region "$REGION" ${SKI
 # ------------------------------------------------------------------ layers
 EXTRA_VARS=(-var "state_bucket=${STATE_BUCKET}" -var "release=${RELEASE:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo manual)}")
 # Connect aliases are unique per region across all AWS customers: default to one derived from the account.
-EXTRA_VARS+=(-var "instance_alias=${INSTANCE_ALIAS:-s7-${TENANT}-${ENVIRONMENT}-${ACCOUNT: -6}}")
-[[ -n "${CLAIM_PHONE:-}" ]] && EXTRA_VARS+=(-var "claim_phone_number=${CLAIM_PHONE}")
+ALIAS="${INSTANCE_ALIAS:-s7-${TENANT}-${ENVIRONMENT}-${ACCOUNT: -6}}"
 
 # CloudShell home is 1 GB and the AWS provider is ~700 MB: keep providers and .terraform in /tmp, shared by all layers.
 export TF_PLUGIN_CACHE_DIR=/tmp/tf-plugin-cache; mkdir -p "$TF_PLUGIN_CACHE_DIR"
@@ -72,7 +71,11 @@ for layer in $LAYERS; do
     -backend-config="bucket=${STATE_BUCKET}" \
     -backend-config="key=${layer}/terraform.tfstate" \
     -backend-config="region=${REGION}" >/dev/null
-  terraform -chdir="$dir" plan -input=false -out=tfplan -var-file="$TFVARS" "${EXTRA_VARS[@]}" -compact-warnings
+  # -var only for variables the layer declares (Terraform rejects undeclared -var values).
+  LAYER_VARS=()
+  [[ "$layer" == "20-connect-core" ]] && LAYER_VARS+=(-var "instance_alias=${ALIAS}")
+  [[ "$layer" == "30-routing" && -n "${CLAIM_PHONE:-}" ]] && LAYER_VARS+=(-var "claim_phone_number=${CLAIM_PHONE}")
+  terraform -chdir="$dir" plan -input=false -out=tfplan -var-file="$TFVARS" "${EXTRA_VARS[@]}" "${LAYER_VARS[@]}" -compact-warnings
   if [[ "${AUTO_APPROVE:-0}" != "1" ]]; then
     read -r -p "Apply ${layer}? [y/N] " answer
     [[ "$answer" =~ ^[Yy]$ ]] || { echo "Stopped before ${layer}."; exit 0; }
