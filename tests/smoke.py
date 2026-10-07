@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -45,7 +46,7 @@ def main() -> None:
 
     # ------------------------------------------------------------ instance
     instances = connect.list_instances()["InstanceSummaryList"]
-    inst = next((i for i in instances if i.get("InstanceAlias", "").startswith(prefix)), None)
+    inst = next((i for i in instances if i.get("InstanceAlias", "") == os.environ.get("INSTANCE_ALIAS") or i.get("InstanceAlias", "").startswith(prefix)), None)
     if not check("Connect instance exists", inst is not None, inst["InstanceAlias"] if inst else "not found"):
         return finish()
     check("Connect instance ACTIVE", inst["InstanceStatus"] == "ACTIVE", inst["InstanceStatus"])
