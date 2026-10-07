@@ -19,7 +19,7 @@ enable_invocation_logging = true
 
 # 30-routing
 routing_file       = "../../tenants/sandbox/routing.yaml"
-claim_phone_number = true
+claim_phone_number = false # new accounts start with a 0 phone-number quota; request an increase then flip
 phone_country_code = "CA"
 admin_users = [
   {
