@@ -111,9 +111,12 @@ def main() -> None:
                 Attributes={"utterance": "I was charged twice on my last invoice"},
             )
             cid = chat["ContactId"]
-            # Chat flows only start running once the customer participant connects.
-            boto3.client("connectparticipant", region_name=region).create_participant_connection(
-                Type=["CONNECTION_CREDENTIALS"], ParticipantToken=chat["ParticipantToken"], ConnectParticipant=True)
+            # StartChatContact requires the customer to subscribe (CreateParticipantConnection) within 5 minutes.
+            cp = boto3.client("connectparticipant", region_name=region)
+            conn = cp.create_participant_connection(
+                Type=["WEBSOCKET", "CONNECTION_CREDENTIALS"], ParticipantToken=chat["ParticipantToken"])
+            cp.send_message(ContentType="text/plain", Content="I was charged twice on my last invoice",
+                            ConnectionToken=conn["ConnectionCredentials"]["ConnectionToken"])
             attrs = {}
             for _ in range(10):
                 time.sleep(2)
