@@ -266,6 +266,7 @@ Resources:
               - lex:RecognizeText
               - lex:RecognizeUtterance
               - lex:StartConversation
+              - lambda:InvokeFunction # AgentCore gateway role -> agent tools Lambda
               - ec2:CreateNetworkInterface
               - ec2:DescribeNetworkInterfaces
               - ec2:DeleteNetworkInterface
@@ -363,6 +364,7 @@ Resources:
                       - lexv2.amazonaws.com
                       - bedrock.amazonaws.com
                       - wisdom.amazonaws.com
+                      - bedrock-agentcore.amazonaws.com
               - Sid: ServiceLinkedRoles
                 Effect: Allow
                 Action: [iam:CreateServiceLinkedRole, iam:DeleteServiceLinkedRole, iam:GetServiceLinkedRoleDeletionStatus]

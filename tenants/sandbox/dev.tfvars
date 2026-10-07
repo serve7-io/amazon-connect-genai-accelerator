@@ -16,6 +16,8 @@ kinesis_stream_mode = "PROVISIONED" # sandbox: fixed 1 shard instead of on-deman
 # into stacks/40-genai/models.auto.tfvars.json at deploy time.
 enforce_guardrail_iam     = true
 enable_invocation_logging = true
+enable_agentic_tools      = true
+demo_crm_file             = "../../tenants/sandbox/demo-crm.json"
 
 # 30-routing
 routing_file       = "../../tenants/sandbox/routing.yaml"

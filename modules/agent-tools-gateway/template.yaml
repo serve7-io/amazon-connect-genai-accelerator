@@ -1,0 +1,113 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Serve7 accelerator - MCP tool gateway for agentic self-service. Amazon Bedrock AgentCore Gateway with a
+  Lambda target exposing the Serve7 CRM tools (customer_lookup, retrieve_status, create_support_ticket).
+  Deployed by stacks/40-genai/agentic.tf through aws_cloudformation_stack (validated with cfn-lint schemas).
+
+Parameters:
+  Prefix:
+    Type: String
+  ToolsLambdaArn:
+    Type: String
+  PermissionsBoundaryArn:
+    Type: String
+  RolePath:
+    Type: String
+    Default: /serve7/workload/
+  AuthorizerType:
+    Type: String
+    Default: AWS_IAM
+    AllowedValues: [AWS_IAM, CUSTOM_JWT]
+    Description: How callers (Amazon Connect / Q in Connect) authenticate to the gateway.
+
+Resources:
+  GatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: !Ref RolePath
+      PermissionsBoundary: !Ref PermissionsBoundaryArn
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: bedrock-agentcore.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: invoke-tools
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: InvokeToolsLambda
+                Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Ref ToolsLambdaArn
+
+  Gateway:
+    Type: AWS::BedrockAgentCore::Gateway
+    Properties:
+      Name: !Sub "${Prefix}-tools"
+      Description: Serve7 CRM tools for the Q in Connect orchestration agent
+      ProtocolType: MCP
+      AuthorizerType: !Ref AuthorizerType
+      RoleArn: !GetAtt GatewayRole.Arn
+
+  CrmTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Properties:
+      GatewayIdentifier: !GetAtt Gateway.GatewayIdentifier
+      Name: crm
+      Description: Serve7 CRM tools (sandbox demo data)
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
+      TargetConfiguration:
+        Mcp:
+          Lambda:
+            LambdaArn: !Ref ToolsLambdaArn
+            ToolSchema:
+              InlinePayload:
+                - Name: customer_lookup
+                  Description: >-
+                    Find the calling customer by phone number, email address or customer id. Returns customer_id,
+                    first name and tier. Call this before any other tool.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      phone: { Type: string, Description: Phone number in any format }
+                      email: { Type: string, Description: Email address }
+                      customer_id: { Type: string, Description: Customer id such as C1001 }
+                - Name: retrieve_status
+                  Description: >-
+                    Status of the customer's orders (item, status, ETA) and open support tickets.
+                    Optionally narrow to one order_id.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      customer_id: { Type: string, Description: Customer id from customer_lookup }
+                      order_id: { Type: string, Description: Optional order number }
+                    Required: [customer_id]
+                - Name: create_support_ticket
+                  Description: >-
+                    Open a support ticket for the customer. Only call after the customer has confirmed the
+                    category and summary. Returns the new ticket id.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      customer_id: { Type: string, Description: Customer id from customer_lookup }
+                      category:
+                        Type: string
+                        Description: "One of: billing, technical, order, account, other"
+                      summary: { Type: string, Description: One or two sentences describing the issue }
+                    Required: [customer_id, category, summary]
+
+Outputs:
+  GatewayArn:
+    Value: !GetAtt Gateway.GatewayArn
+  GatewayId:
+    Value: !GetAtt Gateway.GatewayIdentifier
+  GatewayUrl:
+    Value: !GetAtt Gateway.GatewayUrl
+  TargetId:
+    Value: !GetAtt CrmTarget.TargetId

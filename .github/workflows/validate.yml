@@ -41,7 +41,7 @@ jobs:
         run: cfn-lint bootstrap/bootstrap.yaml modules/qic-selfservice/template.yaml
 
       - name: Lambda unit tests
-        run: python -m pytest -q lambdas/genai_gateway/tests
+        run: python -m pytest -q lambdas/genai_gateway/tests lambdas/agent_tools/tests
 
       - name: Flow template renders for every tenant
         run: |

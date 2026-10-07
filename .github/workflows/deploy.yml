@@ -44,7 +44,7 @@ jobs:
       - run: pip install -q boto3 pytest pyyaml
 
       - name: Unit tests gate
-        run: python -m pytest -q lambdas/genai_gateway/tests
+        run: python -m pytest -q lambdas/genai_gateway/tests lambdas/agent_tools/tests
 
       - name: Resolve tenant
         id: t

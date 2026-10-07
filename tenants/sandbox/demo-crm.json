@@ -1,0 +1,25 @@
+{
+  "_comment": "Fictional demo customers for the sandbox agentic self-service tools. 555-01xx numbers are reserved for fiction.",
+  "customers": [
+    {
+      "customer_id": "C1001", "first_name": "Ava", "last_name": "Martin", "tier": "gold",
+      "phone": "+14035550101", "email": "ava.martin@example.com",
+      "orders": [
+        { "order_id": "5001", "item": "Wi-Fi 7 router", "status": "shipped", "eta": "2026-10-09" },
+        { "order_id": "5002", "item": "Ethernet cable 10m", "status": "processing", "eta": "2026-10-12" }
+      ]
+    },
+    {
+      "customer_id": "C1002", "first_name": "Liam", "last_name": "Nguyen", "tier": "standard",
+      "phone": "+14035550102", "email": "liam.nguyen@example.com",
+      "orders": [
+        { "order_id": "5003", "item": "Mesh extender", "status": "delivered", "eta": "2026-10-01" }
+      ]
+    },
+    {
+      "customer_id": "C1003", "first_name": "Noah", "last_name": "Tremblay", "tier": "standard",
+      "phone": "+15875550103", "email": "noah.tremblay@example.com",
+      "orders": []
+    }
+  ]
+}

@@ -113,6 +113,26 @@ def main() -> None:
     except ClientError as err:
         check("Contact state written to DynamoDB", False, err.response["Error"]["Code"])
 
+    # ------------------------------------------------------------ agentic tools (MCP gateway target Lambda)
+    if "tools" not in SKIP:
+        tools_fn = f"{prefix}-agent-tools"
+        try:
+            def tool(name, **args):
+                r = lam.invoke(FunctionName=tools_fn, Payload=json.dumps({"__tool": name, **args}).encode())
+                return json.loads(r["Payload"].read() or b"{}")
+            who = tool("customer_lookup", phone="403-555-0101")
+            check("Agent tool customer_lookup finds demo customer", who.get("customer_id") == "C1001", json.dumps(who))
+            st = tool("retrieve_status", customer_id="C1001", order_id="5001")
+            check("Agent tool retrieve_status returns order", st.get("orders", [{}])[0].get("status") == "shipped", json.dumps(st)[:160])
+            gw = s.client("cloudformation").describe_stacks(StackName=f"{prefix}-agent-tools-gateway")["Stacks"][0]
+            check("AgentCore tools gateway stack healthy", gw["StackStatus"].endswith("_COMPLETE") and "ROLLBACK" not in gw["StackStatus"],
+                  gw["StackStatus"])
+        except ClientError as err:
+            if err.response["Error"]["Code"] == "ResourceNotFoundException":
+                print("  [SKIP] agentic tools not deployed")
+            else:
+                check("Agentic tools", False, err.response["Error"]["Message"][:200])
+
     # ------------------------------------------------------------ Q in Connect self-service through Lex
     if "qic" not in SKIP:
         try:
