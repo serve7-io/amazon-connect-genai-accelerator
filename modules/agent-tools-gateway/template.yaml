@@ -54,10 +54,11 @@ Resources:
                 Action: lambda:InvokeFunction
                 Resource: !Ref ToolsLambdaArn
 
-  Gateway:
+  # Authorizer type cannot change in place: new logical id = new JWT gateway, old IAM one is deleted.
+  McpGateway:
     Type: AWS::BedrockAgentCore::Gateway
     Properties:
-      Name: !Sub "${Prefix}-tools"
+      Name: !Sub "${Prefix}-mcp"
       Description: Serve7 CRM tools for the Q in Connect orchestration agent
       ProtocolType: MCP
       AuthorizerType: !Ref AuthorizerType
@@ -74,22 +75,13 @@ Resources:
                   ClaimMatchOperator: EQUALS
                   ClaimMatchValue:
                     MatchValueString: !Select [0, !Split ["/.well-known", !Ref JwtDiscoveryUrl]]
-            # AgentCore requires at least one claim rule. Pin the issuer to this Connect instance
-            # (the discovery URL already restricts signing keys to it).
-            CustomClaims:
-              - InboundTokenClaimName: iss
-                InboundTokenClaimValueType: STRING
-                AuthorizingClaimMatchValue:
-                  ClaimMatchOperator: EQUALS
-                  ClaimMatchValue:
-                    MatchValueString: !Select [0, !Split ["/.well-known", !Ref JwtDiscoveryUrl]]
         - !Ref AWS::NoValue
       RoleArn: !GetAtt GatewayRole.Arn
 
-  CrmTarget:
+  McpCrmTarget:
     Type: AWS::BedrockAgentCore::GatewayTarget
     Properties:
-      GatewayIdentifier: !GetAtt Gateway.GatewayIdentifier
+      GatewayIdentifier: !GetAtt McpGateway.GatewayIdentifier
       Name: crm
       Description: Serve7 CRM tools (sandbox demo data)
       CredentialProviderConfigurations:
@@ -136,10 +128,10 @@ Resources:
 
 Outputs:
   GatewayArn:
-    Value: !GetAtt Gateway.GatewayArn
+    Value: !GetAtt McpGateway.GatewayArn
   GatewayId:
-    Value: !GetAtt Gateway.GatewayIdentifier
+    Value: !GetAtt McpGateway.GatewayIdentifier
   GatewayUrl:
-    Value: !GetAtt Gateway.GatewayUrl
+    Value: !GetAtt McpGateway.GatewayUrl
   TargetId:
-    Value: !GetAtt CrmTarget.TargetId
+    Value: !GetAtt McpCrmTarget.TargetId
