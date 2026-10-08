@@ -1,0 +1,396 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Serve7 Connect Phase 1 - one self-contained Amazon Connect instance as code: instance (Contact Lens + flow logs),
+  2 hours of operation, 2 queues, 1 routing profile, 1 agent security profile, 2 agent users, 2 inbound flows with
+  Contact Lens enabled in the flow, recordings/transcripts storage, optional phone number. Every ARN inside the flows
+  is a reference to a resource in this stack, so each deployment wires to its own queues and hours.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: Instance }
+        Parameters: [InstanceAlias, TimeZone]
+      - Label: { default: Agents }
+        Parameters: [AgentUsernamePrefix]
+      - Label: { default: "Phone number (optional, needs quota)" }
+        Parameters: [PhoneCountryCode, PhoneType, PhonePrefix]
+
+Parameters:
+  InstanceAlias:
+    Type: String
+    Description: Globally unique per region. Becomes https://<alias>.my.connect.aws
+    AllowedPattern: "^(?!d-)([\\da-zA-Z]+)([-]*[\\da-zA-Z])*$"
+    MaxLength: 45
+  TimeZone:
+    Type: String
+    Default: America/Edmonton
+    Description: Time zone for both hours of operation (IANA name).
+  AgentUsernamePrefix:
+    Type: String
+    Default: agent
+    AllowedPattern: "^[a-zA-Z0-9_.-]{1,40}$"
+    Description: Users are created as <prefix>1 and <prefix>2.
+  PhoneCountryCode:
+    Type: String
+    Default: ""
+    AllowedPattern: "^([A-Z]{2})?$"
+    Description: Empty = no phone number. Otherwise e.g. CA or US (the account needs phone number quota).
+  PhoneType:
+    Type: String
+    Default: DID
+    AllowedValues: [DID, TOLL_FREE]
+  PhonePrefix:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(\\+[0-9]{1,15})?$"
+    Description: Optional area-code prefix, e.g. +1403 for Calgary.
+  RecordingRetentionDays:
+    Type: Number
+    Default: 30
+    MinValue: 1
+
+Conditions:
+  ClaimPhone: !Not [!Equals [!Ref PhoneCountryCode, ""]]
+  HasPhonePrefix: !Not [!Equals [!Ref PhonePrefix, ""]]
+
+Resources:
+  # ------------------------------------------------------------------ instance
+  Instance:
+    Type: AWS::Connect::Instance
+    Properties:
+      InstanceAlias: !Ref InstanceAlias
+      IdentityManagementType: CONNECT_MANAGED
+      Attributes:
+        InboundCalls: true
+        OutboundCalls: true
+        ContactLens: true          # Contact Lens analytics available on the instance
+        ContactflowLogs: true      # flow logs to CloudWatch /aws/connect/<alias>
+      Tags:
+        - { Key: serve7:component, Value: connect-phase1 }
+
+  # Recordings, chat transcripts and Contact Lens output (Contact Lens writes next to the recordings).
+  StorageBucket:
+    Type: AWS::S3::Bucket
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_18
+            comment: Phase 1 test stack; access logging belongs to the production design (accelerator layer 10).
+          - id: CKV_AWS_21
+            comment: Versioning would keep old objects and block the clean teardown/redeploy this phase tests.
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-test-data
+            Status: Enabled
+            ExpirationInDays: !Ref RecordingRetentionDays
+
+  StorageBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StorageBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TlsOnly
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource: [!GetAtt StorageBucket.Arn, !Sub "${StorageBucket.Arn}/*"]
+            Condition: { Bool: { aws:SecureTransport: "false" } }
+
+  CallRecordingsStorage:
+    Type: AWS::Connect::InstanceStorageConfig
+    Properties:
+      InstanceArn: !GetAtt Instance.Arn
+      ResourceType: CALL_RECORDINGS
+      StorageType: S3
+      S3Config: { BucketName: !Ref StorageBucket, BucketPrefix: !Sub "connect/${InstanceAlias}/CallRecordings" }
+
+  ChatTranscriptsStorage:
+    Type: AWS::Connect::InstanceStorageConfig
+    Properties:
+      InstanceArn: !GetAtt Instance.Arn
+      ResourceType: CHAT_TRANSCRIPTS
+      StorageType: S3
+      S3Config: { BucketName: !Ref StorageBucket, BucketPrefix: !Sub "connect/${InstanceAlias}/ChatTranscripts" }
+
+  # ------------------------------------------------------------------ hours + queues
+  SalesHours:
+    Type: AWS::Connect::HoursOfOperation
+    Properties:
+      InstanceArn: !GetAtt Instance.Arn
+      Name: Sales Hours
+      Description: Monday to Friday 09:00-17:00
+      TimeZone: !Ref TimeZone
+      Config:
+        - { Day: MONDAY,    StartTime: { Hours: 9, Minutes: 0 }, EndTime: { Hours: 17, Minutes: 0 } }
+        - { Day: TUESDAY,   StartTime: { Hours: 9, Minutes: 0 }, EndTime: { Hours: 17, Minutes: 0 } }
+        - { Day: WEDNESDAY, StartTime: { Hours: 9, Minutes: 0 }, EndTime: { Hours: 17, Minutes: 0 } }
+        - { Day: THURSDAY,  StartTime: { Hours: 9, Minutes: 0 }, EndTime: { Hours: 17, Minutes: 0 } }
+        - { Day: FRIDAY,    StartTime: { Hours: 9, Minutes: 0 }, EndTime: { Hours: 17, Minutes: 0 } }
+
+  SupportHours:
+    Type: AWS::Connect::HoursOfOperation
+    Properties:
+      InstanceArn: !GetAtt Instance.Arn
+      Name: Support Hours
+      Description: Every day 00:00-23:59 (always open, so testing works at any time)
+      TimeZone: !Ref TimeZone
+      Config:
+        - { Day: MONDAY,    StartTime: { Hours: 0, Minutes: 0 }, EndTime: { Hours: 23, Minutes: 59 } }
+        - { Day: TUESDAY,   StartTime: { Hours: 0, Minutes: 0 }, EndTime: { Hours: 23, Minutes: 59 } }
+        - { Day: WEDNESDAY, StartTime: { Hours: 0, Minutes: 0 }, EndTime: { Hours: 23, Minutes: 59 } }
+        - { Day: THURSDAY,  StartTime: { Hours: 0, Minutes: 0 }, EndTime: { Hours: 23, Minutes: 59 } }
+        - { Day: FRIDAY,    StartTime: { Hours: 0, Minutes: 0 }, EndTime: { Hours: 23, Minutes: 59 } }
+        - { Day: SATURDAY,  StartTime: { Hours: 0, Minutes: 0 }, EndTime: { Hours: 23, Minutes: 59 } }
+        - { Day: SUNDAY,    StartTime: { Hours: 0, Minutes: 0 }, EndTime: { Hours: 23, Minutes: 59 } }
+
+  SalesQueue:
+    Type: AWS::Connect::Queue
+    Properties:
+      InstanceArn: !GetAtt Instance.Arn
+      Name: Sales
+      Description: Sales enquiries
+      HoursOfOperationArn: !GetAtt SalesHours.HoursOfOperationArn
+
+  SupportQueue:
+    Type: AWS::Connect::Queue
+    Properties:
+      InstanceArn: !GetAtt Instance.Arn
+      Name: Support
+      Description: Customer support
+      HoursOfOperationArn: !GetAtt SupportHours.HoursOfOperationArn
+
+  # ------------------------------------------------------------------ routing + agents
+  AgentRoutingProfile:
+    Type: AWS::Connect::RoutingProfile
+    Properties:
+      InstanceArn: !GetAtt Instance.Arn
+      Name: Sales and Support Agents
+      Description: Takes Support first, then Sales, on voice and chat
+      DefaultOutboundQueueArn: !GetAtt SupportQueue.QueueArn
+      MediaConcurrencies:
+        - { Channel: VOICE, Concurrency: 1 }
+        - { Channel: CHAT, Concurrency: 2 }
+      QueueConfigs:
+        - { Priority: 1, Delay: 0, QueueReference: { Channel: VOICE, QueueArn: !GetAtt SupportQueue.QueueArn } }
+        - { Priority: 1, Delay: 0, QueueReference: { Channel: CHAT, QueueArn: !GetAtt SupportQueue.QueueArn } }
+        - { Priority: 2, Delay: 0, QueueReference: { Channel: VOICE, QueueArn: !GetAtt SalesQueue.QueueArn } }
+        - { Priority: 2, Delay: 0, QueueReference: { Channel: CHAT, QueueArn: !GetAtt SalesQueue.QueueArn } }
+
+  AgentSecurityProfile:
+    Type: AWS::Connect::SecurityProfile
+    Properties:
+      InstanceArn: !GetAtt Instance.Arn
+      SecurityProfileName: Phase1 Agent
+      Description: Contact Control Panel and outbound calls only
+      Permissions: [BasicAgentAccess, OutboundCallAccess]
+
+  # Initial passwords are generated and kept in Secrets Manager; nothing is typed or printed.
+  Agent1Password:
+    Type: AWS::SecretsManager::Secret
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_149
+            comment: Initial test password, rotated by the agent at first login; AWS-managed key is enough here.
+    Properties:
+      Description: !Sub "Initial Connect password for ${AgentUsernamePrefix}1 on ${InstanceAlias}"
+      GenerateSecretString: { PasswordLength: 20, ExcludePunctuation: true, RequireEachIncludedType: true }
+
+  Agent2Password:
+    Type: AWS::SecretsManager::Secret
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_149
+            comment: Initial test password, rotated by the agent at first login; AWS-managed key is enough here.
+    Properties:
+      Description: !Sub "Initial Connect password for ${AgentUsernamePrefix}2 on ${InstanceAlias}"
+      GenerateSecretString: { PasswordLength: 20, ExcludePunctuation: true, RequireEachIncludedType: true }
+
+  Agent1:
+    Type: AWS::Connect::User
+    Properties:
+      InstanceArn: !GetAtt Instance.Arn
+      Username: !Sub "${AgentUsernamePrefix}1"
+      Password: !Sub "{{resolve:secretsmanager:${Agent1Password}}}"
+      IdentityInfo: { FirstName: Agent, LastName: One }
+      PhoneConfig: { PhoneType: SOFT_PHONE, AutoAccept: false, AfterContactWorkTimeLimit: 0 }
+      RoutingProfileArn: !GetAtt AgentRoutingProfile.RoutingProfileArn
+      SecurityProfileArns: [!GetAtt AgentSecurityProfile.SecurityProfileArn]
+
+  Agent2:
+    Type: AWS::Connect::User
+    Properties:
+      InstanceArn: !GetAtt Instance.Arn
+      Username: !Sub "${AgentUsernamePrefix}2"
+      Password: !Sub "{{resolve:secretsmanager:${Agent2Password}}}"
+      IdentityInfo: { FirstName: Agent, LastName: Two }
+      PhoneConfig: { PhoneType: SOFT_PHONE, AutoAccept: false, AfterContactWorkTimeLimit: 0 }
+      RoutingProfileArn: !GetAtt AgentRoutingProfile.RoutingProfileArn
+      SecurityProfileArns: [!GetAtt AgentSecurityProfile.SecurityProfileArn]
+
+  # ------------------------------------------------------------------ flows
+  # Content is the flow JSON with every resource ARN replaced by ${Resource.Attribute}; CloudFormation fills in
+  # this stack's ARNs at deploy time. scripts/templatize-flow.py produces this form from a flow exported elsewhere.
+  # First two blocks: flow logging on, then "Set recording and analytics behavior" with Contact Lens for voice and chat.
+  SalesInboundFlow:
+    Type: AWS::Connect::ContactFlow
+    Properties:
+      InstanceArn: !GetAtt Instance.Arn
+      Name: Sales Inbound
+      Description: Greets, enables Contact Lens, checks Sales hours, queues to Sales
+      Type: CONTACT_FLOW
+      State: ACTIVE
+      Content: !Sub |
+        {
+          "Version": "2019-10-30",
+          "StartAction": "flow-logging",
+          "Actions": [
+            { "Identifier": "flow-logging", "Type": "UpdateFlowLoggingBehavior",
+              "Parameters": { "FlowLoggingBehavior": "Enabled" },
+              "Transitions": { "NextAction": "contact-lens" } },
+            { "Identifier": "contact-lens", "Type": "UpdateContactRecordingBehavior",
+              "Parameters": {
+                "RecordingBehavior": { "RecordedParticipants": ["Agent", "Customer"] },
+                "AnalyticsBehavior": {
+                  "Enabled": "True", "AnalyticsLanguage": "en-US",
+                  "AnalyticsRedactionBehavior": "Enabled", "AnalyticsRedactionResults": "RedactedAndOriginal",
+                  "ChannelConfiguration": { "Chat": { "AnalyticsModes": ["ContactLens"] },
+                                            "Voice": { "AnalyticsModes": ["RealTime"] } } } },
+              "Transitions": { "NextAction": "greeting" } },
+            { "Identifier": "greeting", "Type": "MessageParticipant",
+              "Parameters": { "Text": "Thank you for contacting the Sales team." },
+              "Transitions": { "NextAction": "set-queue",
+                               "Errors": [ { "NextAction": "set-queue", "ErrorType": "NoMatchingError" } ] } },
+            { "Identifier": "set-queue", "Type": "UpdateContactTargetQueue",
+              "Parameters": { "QueueId": "${SalesQueue.QueueArn}" },
+              "Transitions": { "NextAction": "hours-check",
+                               "Errors": [ { "NextAction": "error-message", "ErrorType": "NoMatchingError" } ] } },
+            { "Identifier": "hours-check", "Type": "CheckHoursOfOperation",
+              "Parameters": { "HoursOfOperationId": "${SalesHours.HoursOfOperationArn}" },
+              "Transitions": { "NextAction": "transfer",
+                               "Conditions": [
+                                 { "NextAction": "transfer", "Condition": { "Operator": "Equals", "Operands": ["True"] } },
+                                 { "NextAction": "closed-message", "Condition": { "Operator": "Equals", "Operands": ["False"] } } ],
+                               "Errors": [ { "NextAction": "transfer", "ErrorType": "NoMatchingError" } ] } },
+            { "Identifier": "transfer", "Type": "TransferContactToQueue", "Parameters": {},
+              "Transitions": { "NextAction": "error-message",
+                               "Errors": [ { "NextAction": "error-message", "ErrorType": "QueueAtCapacity" },
+                                           { "NextAction": "error-message", "ErrorType": "NoMatchingError" } ] } },
+            { "Identifier": "closed-message", "Type": "MessageParticipant",
+              "Parameters": { "Text": "Sales is open Monday to Friday, 9 to 5. Please contact us again during those hours." },
+              "Transitions": { "NextAction": "disconnect",
+                               "Errors": [ { "NextAction": "disconnect", "ErrorType": "NoMatchingError" } ] } },
+            { "Identifier": "error-message", "Type": "MessageParticipant",
+              "Parameters": { "Text": "Sorry, we cannot connect you right now. Please try again later." },
+              "Transitions": { "NextAction": "disconnect",
+                               "Errors": [ { "NextAction": "disconnect", "ErrorType": "NoMatchingError" } ] } },
+            { "Identifier": "disconnect", "Type": "DisconnectParticipant", "Parameters": {}, "Transitions": {} }
+          ]
+        }
+
+  SupportInboundFlow:
+    Type: AWS::Connect::ContactFlow
+    Properties:
+      InstanceArn: !GetAtt Instance.Arn
+      Name: Support Inbound
+      Description: Greets, enables Contact Lens, checks Support hours, queues to Support
+      Type: CONTACT_FLOW
+      State: ACTIVE
+      Content: !Sub |
+        {
+          "Version": "2019-10-30",
+          "StartAction": "flow-logging",
+          "Actions": [
+            { "Identifier": "flow-logging", "Type": "UpdateFlowLoggingBehavior",
+              "Parameters": { "FlowLoggingBehavior": "Enabled" },
+              "Transitions": { "NextAction": "contact-lens" } },
+            { "Identifier": "contact-lens", "Type": "UpdateContactRecordingBehavior",
+              "Parameters": {
+                "RecordingBehavior": { "RecordedParticipants": ["Agent", "Customer"] },
+                "AnalyticsBehavior": {
+                  "Enabled": "True", "AnalyticsLanguage": "en-US",
+                  "AnalyticsRedactionBehavior": "Enabled", "AnalyticsRedactionResults": "RedactedAndOriginal",
+                  "ChannelConfiguration": { "Chat": { "AnalyticsModes": ["ContactLens"] },
+                                            "Voice": { "AnalyticsModes": ["RealTime"] } } } },
+              "Transitions": { "NextAction": "greeting" } },
+            { "Identifier": "greeting", "Type": "MessageParticipant",
+              "Parameters": { "Text": "Thank you for contacting Support. An agent will be with you shortly." },
+              "Transitions": { "NextAction": "set-queue",
+                               "Errors": [ { "NextAction": "set-queue", "ErrorType": "NoMatchingError" } ] } },
+            { "Identifier": "set-queue", "Type": "UpdateContactTargetQueue",
+              "Parameters": { "QueueId": "${SupportQueue.QueueArn}" },
+              "Transitions": { "NextAction": "hours-check",
+                               "Errors": [ { "NextAction": "error-message", "ErrorType": "NoMatchingError" } ] } },
+            { "Identifier": "hours-check", "Type": "CheckHoursOfOperation",
+              "Parameters": { "HoursOfOperationId": "${SupportHours.HoursOfOperationArn}" },
+              "Transitions": { "NextAction": "transfer",
+                               "Conditions": [
+                                 { "NextAction": "transfer", "Condition": { "Operator": "Equals", "Operands": ["True"] } },
+                                 { "NextAction": "closed-message", "Condition": { "Operator": "Equals", "Operands": ["False"] } } ],
+                               "Errors": [ { "NextAction": "transfer", "ErrorType": "NoMatchingError" } ] } },
+            { "Identifier": "transfer", "Type": "TransferContactToQueue", "Parameters": {},
+              "Transitions": { "NextAction": "error-message",
+                               "Errors": [ { "NextAction": "error-message", "ErrorType": "QueueAtCapacity" },
+                                           { "NextAction": "error-message", "ErrorType": "NoMatchingError" } ] } },
+            { "Identifier": "closed-message", "Type": "MessageParticipant",
+              "Parameters": { "Text": "Support is closed right now. Please contact us again later." },
+              "Transitions": { "NextAction": "disconnect",
+                               "Errors": [ { "NextAction": "disconnect", "ErrorType": "NoMatchingError" } ] } },
+            { "Identifier": "error-message", "Type": "MessageParticipant",
+              "Parameters": { "Text": "Sorry, we cannot connect you right now. Please try again later." },
+              "Transitions": { "NextAction": "disconnect",
+                               "Errors": [ { "NextAction": "disconnect", "ErrorType": "NoMatchingError" } ] } },
+            { "Identifier": "disconnect", "Type": "DisconnectParticipant", "Parameters": {}, "Transitions": {} }
+          ]
+        }
+
+  # ------------------------------------------------------------------ phone number (optional)
+  # CloudFormation can claim a number but has no property to point it at a flow; phase1.sh does that
+  # association (AssociatePhoneNumberContactFlow) right after the stack is deployed.
+  PhoneNumber:
+    Type: AWS::Connect::PhoneNumber
+    Condition: ClaimPhone
+    Properties:
+      TargetArn: !GetAtt Instance.Arn
+      CountryCode: !Ref PhoneCountryCode
+      Type: !Ref PhoneType
+      Prefix: !If [HasPhonePrefix, !Ref PhonePrefix, !Ref AWS::NoValue]
+      Description: Phase 1 test number -> Support Inbound
+
+Outputs:
+  InstanceId: { Value: !GetAtt Instance.Id }
+  InstanceArn: { Value: !GetAtt Instance.Arn }
+  AccessUrl: { Value: !Sub "https://${InstanceAlias}.my.connect.aws" }
+  SalesHoursArn: { Value: !GetAtt SalesHours.HoursOfOperationArn }
+  SupportHoursArn: { Value: !GetAtt SupportHours.HoursOfOperationArn }
+  SalesQueueArn: { Value: !GetAtt SalesQueue.QueueArn }
+  SupportQueueArn: { Value: !GetAtt SupportQueue.QueueArn }
+  RoutingProfileArn: { Value: !GetAtt AgentRoutingProfile.RoutingProfileArn }
+  AgentSecurityProfileArn: { Value: !GetAtt AgentSecurityProfile.SecurityProfileArn }
+  Agent1Arn: { Value: !GetAtt Agent1.UserArn }
+  Agent2Arn: { Value: !GetAtt Agent2.UserArn }
+  Agent1PasswordSecret: { Value: !Ref Agent1Password }
+  Agent2PasswordSecret: { Value: !Ref Agent2Password }
+  SalesInboundFlowArn: { Value: !GetAtt SalesInboundFlow.ContactFlowArn }
+  SupportInboundFlowArn: { Value: !GetAtt SupportInboundFlow.ContactFlowArn }
+  StorageBucket: { Value: !Ref StorageBucket }
+  PhoneNumberArn:
+    Condition: ClaimPhone
+    Value: !GetAtt PhoneNumber.PhoneNumberArn
+  PhoneNumber:
+    Condition: ClaimPhone
+    Value: !GetAtt PhoneNumber.Address
