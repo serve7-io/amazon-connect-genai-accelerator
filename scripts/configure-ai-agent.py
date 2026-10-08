@@ -3,7 +3,7 @@
 
     python3 scripts/configure-ai-agent.py --tenant sandbox [--env dev]
 
-1. Link the AI agent to its security profile (connect:AssociateSecurityProfiles, entity type AI_AGENT).
+1. Link the AI agent (unqualified, $LATEST and the newest version) to its security profile (connect:AssociateSecurityProfiles, entity type AI_AGENT).
    The profile is what allows the agent to call the CRM tools.
 2. Make the newest published agent version the assistant's self-service orchestration agent
    (qconnect:UpdateAssistantAIAgent, use case Connect.SelfService).
@@ -51,22 +51,23 @@ def main() -> None:
     head, tail = o["AgentArn"].rsplit("/", 1)
     agent_arn = f"{head}/{tail.split(':')[0]}"          # unqualified (no :$LATEST / :N)
 
-    # 1. security profile <-> agent
-    linked = {p["Id"] for p in connect.list_entity_security_profiles(
-        InstanceId=instance_id, EntityType="AI_AGENT", EntityArn=agent_arn).get("SecurityProfiles", [])}
-    if profile_id in linked:
-        print(f"security profile {profile_id} already linked to {agent_id}")
-    else:
-        connect.associate_security_profiles(InstanceId=instance_id, EntityType="AI_AGENT", EntityArn=agent_arn,
-                                            SecurityProfiles=[{"Id": profile_id}])
-        print(f"linked security profile {profile_id} to AI agent {agent_id}")
-
-    # 2. newest version -> assistant default for self-service
+    # newest published version
     versions = qc.list_ai_agent_versions(assistantId=assistant_id, aiAgentId=agent_id).get("aiAgentVersionSummaries", [])
     if not versions:
         sys.exit(f"AI agent {agent_id} has no published version")
     latest = max(v["versionNumber"] for v in versions)
     want = f"{agent_id}:{latest}"
+    # 1. security profile <-> agent. Connect checks the profile per agent ARN, and the console links the
+    #    unqualified ARN, :$LATEST and each published version, so we do the same for the version in use.
+    for arn in (agent_arn, f"{agent_arn}:$LATEST", f"{agent_arn}:{latest}"):
+        linked = {p["Id"] for p in connect.list_entity_security_profiles(
+            InstanceId=instance_id, EntityType="AI_AGENT", EntityArn=arn).get("SecurityProfiles", [])}
+        if profile_id not in linked:
+            connect.associate_security_profiles(InstanceId=instance_id, EntityType="AI_AGENT", EntityArn=arn,
+                                                SecurityProfiles=[{"Id": profile_id}])
+            print(f"linked security profile {profile_id} to {arn.rsplit('/', 1)[1]}")
+
+    # 2. newest version -> assistant default for self-service
     current = (qc.get_assistant(assistantId=assistant_id)["assistant"].get("aiAgentConfiguration", {})
                .get("ORCHESTRATION", {}).get("aiAgentId"))
     if current == want:
