@@ -38,13 +38,16 @@ jobs:
           done
 
       - name: CloudFormation lint
-        run: cfn-lint bootstrap/bootstrap.yaml modules/*/template.yaml
+        run: cfn-lint bootstrap/bootstrap.yaml modules/*/template.yaml cloudformation/*/template.yaml
 
       - name: Tenant folders are complete and consistent
         run: python scripts/check-tenants.py
 
       - name: Lambda unit tests
         run: python -m pytest -q lambdas/genai_gateway/tests lambdas/agent_tools/tests
+
+      - name: CloudFormation Phase 1 tools (flow templatizer, wiring verifier)
+        run: python -m pytest -q cloudformation/connect-phase1/tests
 
       - name: Flow template renders for every tenant
         run: |
