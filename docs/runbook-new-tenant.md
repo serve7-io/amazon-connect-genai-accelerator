@@ -144,6 +144,21 @@ because state keys and the bootstrap stack are per account.
      Without `PROD_CONFIRM`, `deploy.sh` refuses a local prod deploy.
 4. `destroy.sh` never destroys prod.
 
+## Agentic self-service (optional, `enable_agentic_tools = true`)
+
+Everything is code; no console steps.
+
+| Piece | Where |
+|---|---|
+| Demo CRM table, tools Lambda, AgentCore MCP gateway (JWT: Connect discovery URL + gateway id as audience, MCP 2025-03-26) | `stacks/40-genai/agentic.tf`, `modules/agent-tools-gateway` |
+| Connect MCP integration, AI security profile (3 CRM tools + `Wisdom.View`), ORCHESTRATION AI agent + version | `stacks/40-genai/agent.tf`, `modules/ai-selfservice-agent` |
+| Profile linked to the agent; newest version set as the assistant's self-service agent | `scripts/configure-ai-agent.py` (run by `deploy.sh`) |
+
+On a gateway's first create, `deploy.sh` applies layer 40 twice: the gateway id only exists after create, and it is its own JWT audience.
+The agent may only state account or order facts a CRM tool returned (tool instructions); on tool errors it offers a human.
+
+Test: chat "I'm customer C1001, where is my order?" should answer with order 5001 (shipped) and 5002 (processing) from `demo-crm.json`.
+
 ## Removing a tenant
 
 ```bash
