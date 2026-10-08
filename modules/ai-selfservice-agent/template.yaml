@@ -1,0 +1,703 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Serve7 accelerator - agentic self-service AI agent: Connect MCP integration for the AgentCore gateway, AI security
+  profile with the CRM tools, ORCHESTRATION AI agent (knowledge base + CRM tools + escalation) and a published version. Deployed
+  by stacks/40-genai/agent.tf. Generated from the working sandbox configuration of 2026-10-08.'
+Parameters:
+  Prefix:
+    Type: String
+  ConnectInstanceArn:
+    Type: String
+  AssistantId:
+    Type: String
+  GatewayId:
+    Type: String
+    Description: AgentCore gateway id (also the MCP integration namespace)
+  GatewayUrl:
+    Type: String
+  OrchestrationPromptId:
+    Type: String
+    Description: AWS-managed orchestration prompt (id:version) the agent uses
+  ProfilePermissions:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: Connect permissions for the AI agent security profile (e.g. the Connect assistant view permission)
+  Locale:
+    Type: String
+    Default: en_US
+Conditions:
+  HasPermissions:
+    Fn::Not:
+    - Fn::Equals:
+      - Fn::Join:
+        - ''
+        - Ref: ProfilePermissions
+      - ''
+Resources:
+  McpIntegration:
+    Type: AWS::AppIntegrations::Application
+    Properties:
+      Name:
+        Fn::Sub: ${Prefix}-mcp-tools
+      Description: Serve7 CRM tools (AgentCore gateway) for the AI agent
+      Namespace:
+        Ref: GatewayId
+      ApplicationType: MCP_SERVER
+      ApplicationSourceConfig:
+        ExternalUrlConfig:
+          AccessUrl:
+            Ref: GatewayUrl
+  McpIntegrationAssociation:
+    Type: AWS::Connect::IntegrationAssociation
+    Properties:
+      InstanceId:
+        Ref: ConnectInstanceArn
+      IntegrationType: APPLICATION
+      IntegrationArn:
+        Fn::GetAtt:
+        - McpIntegration
+        - ApplicationArn
+  AgentSecurityProfile:
+    Type: AWS::Connect::SecurityProfile
+    DependsOn: McpIntegrationAssociation
+    Properties:
+      InstanceArn:
+        Ref: ConnectInstanceArn
+      SecurityProfileName:
+        Fn::Sub: ${Prefix}-ai-selfservice
+      Description: Permissions of the self-service AI agent (CRM tools only)
+      Permissions:
+        Fn::If:
+        - HasPermissions
+        - Ref: ProfilePermissions
+        - Ref: AWS::NoValue
+      Applications:
+      - Namespace:
+          Ref: GatewayId
+        Type: MCP
+        ApplicationPermissions:
+        - crm___customer_lookup
+        - crm___retrieve_status
+        - crm___create_support_ticket
+  SelfServiceAgent:
+    Type: AWS::Wisdom::AIAgent
+    DependsOn: AgentSecurityProfile
+    Properties:
+      AssistantId:
+        Ref: AssistantId
+      Name:
+        Fn::Sub: ${Prefix}-selfservice
+      Description: Serve7 agentic self-service - KB answers plus CRM tools (managed by the accelerator)
+      Type: ORCHESTRATION
+      Configuration:
+        OrchestrationAIAgentConfiguration:
+          OrchestrationAIPromptId:
+            Ref: OrchestrationPromptId
+          ConnectInstanceArn:
+            Ref: ConnectInstanceArn
+          Locale:
+            Ref: Locale
+          ToolConfigurations:
+          - ToolName: Retrieve
+            ToolType: MODEL_CONTEXT_PROTOCOL
+            Title: aws_service__qconnect_Retrieve
+            ToolId: aws_service__qconnect_Retrieve
+            Description: Searches the knowledge base to return relevant knowledge article excerpts.
+            Instruction:
+              Instruction: Search the knowledge base using semantic search to find relevant information. Use the results of
+                the RETRIEVE tool to provide an informed answer to the customer's query.
+              Examples:
+              - "Good example:\n<message>\n  I found your warranty covers parts replacement for any manufacturing defects\
+                \ during the first year. We offer extended warranty coverage for eligible products beyond the manufacturer's\
+                \ warranty period.\n</message>"
+              - 'Example for no results:
+
+                <message>
+
+                I don''t have specific information about that topic available.
+
+                </message>'
+            OverrideInputValues:
+            - JsonPath: $.assistantId
+              Value:
+                Constant:
+                  Type: STRING
+                  Value: '{{$.assistantId}}'
+            - JsonPath: $.retrievalConfiguration.knowledgeSource.assistantAssociationIds
+              Value:
+                Constant:
+                  Type: JSON_STRING
+                  Value: '{{$.knowledgeBaseAssistantAssociationIds}}'
+            InputSchema:
+              type: object
+              properties:
+                assistantId:
+                  type: string
+                retrievalConfiguration:
+                  type: object
+                  properties:
+                    knowledgeSource:
+                      oneOf:
+                      - type: object
+                        properties:
+                          assistantAssociationIds:
+                            type: array
+                            items:
+                              type: string
+                            uniqueItems: false
+                        required:
+                        - assistantAssociationIds
+                        additionalProperties: false
+                        $schema: http://json-schema.org/draft-07/schema#
+                      type: object
+                    filter:
+                      oneOf:
+                      - type: object
+                        properties:
+                          andAll:
+                            type: array
+                            items:
+                              type: object
+                              $schema: http://json-schema.org/draft-07/schema#
+                            uniqueItems: false
+                        required:
+                        - andAll
+                        additionalProperties: false
+                        $schema: http://json-schema.org/draft-07/schema#
+                      - type: object
+                        properties:
+                          equals:
+                            type: object
+                            properties:
+                              value:
+                                type:
+                                - string
+                                - number
+                                - boolean
+                                - object
+                                - array
+                                - 'null'
+                              key:
+                                type: string
+                            required:
+                            - key
+                            - value
+                            $schema: http://json-schema.org/draft-07/schema#
+                        required:
+                        - equals
+                        additionalProperties: false
+                        $schema: http://json-schema.org/draft-07/schema#
+                      - type: object
+                        properties:
+                          greaterThan:
+                            type: object
+                            properties:
+                              value:
+                                type:
+                                - string
+                                - number
+                                - boolean
+                                - object
+                                - array
+                                - 'null'
+                              key:
+                                type: string
+                            required:
+                            - key
+                            - value
+                            $schema: http://json-schema.org/draft-07/schema#
+                        required:
+                        - greaterThan
+                        additionalProperties: false
+                        $schema: http://json-schema.org/draft-07/schema#
+                      - type: object
+                        properties:
+                          greaterThanOrEquals:
+                            type: object
+                            properties:
+                              value:
+                                type:
+                                - string
+                                - number
+                                - boolean
+                                - object
+                                - array
+                                - 'null'
+                              key:
+                                type: string
+                            required:
+                            - key
+                            - value
+                            $schema: http://json-schema.org/draft-07/schema#
+                        required:
+                        - greaterThanOrEquals
+                        additionalProperties: false
+                        $schema: http://json-schema.org/draft-07/schema#
+                      - type: object
+                        properties:
+                          in:
+                            type: object
+                            properties:
+                              value:
+                                type:
+                                - string
+                                - number
+                                - boolean
+                                - object
+                                - array
+                                - 'null'
+                              key:
+                                type: string
+                            required:
+                            - key
+                            - value
+                            $schema: http://json-schema.org/draft-07/schema#
+                        required:
+                        - in
+                        additionalProperties: false
+                        $schema: http://json-schema.org/draft-07/schema#
+                      - type: object
+                        properties:
+                          lessThan:
+                            type: object
+                            properties:
+                              value:
+                                type:
+                                - string
+                                - number
+                                - boolean
+                                - object
+                                - array
+                                - 'null'
+                              key:
+                                type: string
+                            required:
+                            - key
+                            - value
+                            $schema: http://json-schema.org/draft-07/schema#
+                        required:
+                        - lessThan
+                        additionalProperties: false
+                        $schema: http://json-schema.org/draft-07/schema#
+                      - type: object
+                        properties:
+                          lessThanOrEquals:
+                            type: object
+                            properties:
+                              value:
+                                type:
+                                - string
+                                - number
+                                - boolean
+                                - object
+                                - array
+                                - 'null'
+                              key:
+                                type: string
+                            required:
+                            - key
+                            - value
+                            $schema: http://json-schema.org/draft-07/schema#
+                        required:
+                        - lessThanOrEquals
+                        additionalProperties: false
+                        $schema: http://json-schema.org/draft-07/schema#
+                      - type: object
+                        properties:
+                          listContains:
+                            type: object
+                            properties:
+                              value:
+                                type:
+                                - string
+                                - number
+                                - boolean
+                                - object
+                                - array
+                                - 'null'
+                              key:
+                                type: string
+                            required:
+                            - key
+                            - value
+                            $schema: http://json-schema.org/draft-07/schema#
+                        required:
+                        - listContains
+                        additionalProperties: false
+                        $schema: http://json-schema.org/draft-07/schema#
+                      - type: object
+                        properties:
+                          notEquals:
+                            type: object
+                            properties:
+                              value:
+                                type:
+                                - string
+                                - number
+                                - boolean
+                                - object
+                                - array
+                                - 'null'
+                              key:
+                                type: string
+                            required:
+                            - key
+                            - value
+                            $schema: http://json-schema.org/draft-07/schema#
+                        required:
+                        - notEquals
+                        additionalProperties: false
+                        $schema: http://json-schema.org/draft-07/schema#
+                      - type: object
+                        properties:
+                          notIn:
+                            type: object
+                            properties:
+                              value:
+                                type:
+                                - string
+                                - number
+                                - boolean
+                                - object
+                                - array
+                                - 'null'
+                              key:
+                                type: string
+                            required:
+                            - key
+                            - value
+                            $schema: http://json-schema.org/draft-07/schema#
+                        required:
+                        - notIn
+                        additionalProperties: false
+                        $schema: http://json-schema.org/draft-07/schema#
+                      - type: object
+                        properties:
+                          orAll:
+                            type: array
+                            items:
+                              type: object
+                              $schema: http://json-schema.org/draft-07/schema#
+                            uniqueItems: false
+                        required:
+                        - orAll
+                        additionalProperties: false
+                        $schema: http://json-schema.org/draft-07/schema#
+                      - type: object
+                        properties:
+                          startsWith:
+                            type: object
+                            properties:
+                              value:
+                                type:
+                                - string
+                                - number
+                                - boolean
+                                - object
+                                - array
+                                - 'null'
+                              key:
+                                type: string
+                            required:
+                            - key
+                            - value
+                            $schema: http://json-schema.org/draft-07/schema#
+                        required:
+                        - startsWith
+                        additionalProperties: false
+                        $schema: http://json-schema.org/draft-07/schema#
+                      - type: object
+                        properties:
+                          stringContains:
+                            type: object
+                            properties:
+                              value:
+                                type:
+                                - string
+                                - number
+                                - boolean
+                                - object
+                                - array
+                                - 'null'
+                              key:
+                                type: string
+                            required:
+                            - key
+                            - value
+                            $schema: http://json-schema.org/draft-07/schema#
+                        required:
+                        - stringContains
+                        additionalProperties: false
+                        $schema: http://json-schema.org/draft-07/schema#
+                      type: object
+                    overrideKnowledgeBaseSearchType:
+                      type: string
+                      enum:
+                      - SEMANTIC
+                      - HYBRID
+                    numberOfResults:
+                      type: number
+                  required:
+                  - knowledgeSource
+                  $schema: http://json-schema.org/draft-07/schema#
+                retrievalQuery:
+                  type: string
+              required:
+              - assistantId
+              - retrievalConfiguration
+              - retrievalQuery
+              $schema: http://json-schema.org/draft-07/schema#
+            OutputSchema:
+              type: object
+              properties:
+                results:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      sourceId:
+                        type: string
+                      contentText:
+                        type: string
+                      referenceType:
+                        type: string
+                        enum:
+                        - KNOWLEDGE_BASE
+                        - BEDROCK_KB_WEB
+                        - BEDROCK_KB_SALESFORCE
+                        - BEDROCK_KB_S3
+                        - BEDROCK_KB_CUSTOM_DOCUMENT
+                        - BEDROCK_KB_CONFLUENCE
+                        - BEDROCK_KB_SHAREPOINT
+                        - BEDROCK_KB_SQL
+                        - WEB_CRAWLER
+                        - BEDROCK_KB_KENDRA
+                      associationId:
+                        type: string
+                    required:
+                    - associationId
+                    - sourceId
+                    - referenceType
+                    - contentText
+                    $schema: http://json-schema.org/draft-07/schema#
+                  uniqueItems: false
+                errors:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        description: The error code categorizing the failure. . Error code returned for a failed assistant
+                          association during multi-association Retrieve.
+                        enum:
+                        - INTERNAL_SERVER_ERROR
+                        - ACCESS_DENIED
+                        - RESOURCE_NOT_FOUND
+                        - DEPENDENCY_FAILED
+                        - THROTTLED
+                        - VALIDATION_ERROR
+                      message:
+                        type: string
+                        description: A human-readable description of the failure.
+                      associationId:
+                        type: string
+                        description: The assistant association ID for which the retrieval failed.
+                    required:
+                    - associationId
+                    - code
+                    - message
+                    description: An error returned for an individual assistant association during a multi-association Retrieve.
+                      The overall request may still succeed with results from other associations.
+                    $schema: http://json-schema.org/draft-07/schema#
+                  uniqueItems: false
+                  description: Per-association errors returned when one or more associations failed during a multi-association
+                    Retrieve. The overall request still succeeds when at least one association returns results.
+              required:
+              - results
+              $schema: http://json-schema.org/draft-07/schema#
+            UserInteractionConfiguration:
+              IsUserConfirmationRequired: false
+          - ToolName: Escalate
+            ToolType: RETURN_TO_CONTROL
+            Description: Escalate to human agent when customer issue can not solve
+            Instruction:
+              Instruction: Escalate the conversation to a human agent when you cannot provide adequate assistance, when other
+                tools fail or return errors, or when the customer's request requires human intervention.
+              Examples:
+              - 'Good example - Tool errors:
+
+                <message>
+
+                I''m having trouble accessing the information you need right now. Would you like me to connect you with a
+                human agent who can help you further?
+
+                </message>'
+              - 'Good example - Frustrated customer:
+
+                <message>
+
+                I understand your frustration with this issue. Would you like me to connect you with a human agent who can
+                help you further?
+
+                </message>'
+              - 'Bad example (avoid this):
+
+                <message>
+
+                I''m unable to help with this. Let me escalate you to a human agent.
+
+                </message>'
+            InputSchema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Reason of escalation
+              required:
+              - reason
+            UserInteractionConfiguration:
+              IsUserConfirmationRequired: false
+          - ToolName: Complete
+            ToolType: RETURN_TO_CONTROL
+            Description: Close conversation when customer has no more questions
+            Instruction:
+              Instruction: Mark the conversation as complete ONLY after confirming the customer has no additional questions
+                or needs. Always ask if there's anything else you can help with before using this tool.
+            InputSchema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Reason of completion
+              required:
+              - reason
+            UserInteractionConfiguration:
+              IsUserConfirmationRequired: false
+          - ToolName: crm___customer_lookup
+            ToolType: MODEL_CONTEXT_PROTOCOL
+            Title:
+              Fn::Sub: gateway_${GatewayId}__crm___customer_lookup
+            ToolId:
+              Fn::Sub: gateway_${GatewayId}__crm___customer_lookup
+            Description: Find the calling customer by phone number, email address or customer id. Returns customer_id, first
+              name and tier. Call this before any other tool.
+            Instruction:
+              Instruction: Identify the customer before discussing any account, order or ticket. If you do not have a customer
+                id, email or phone number, ask for one. Only state account, order or ticket facts that a CRM tool returned
+                in this conversation. If a tool fails or returns nothing, say you cannot see that information right now and
+                offer a human agent. Never repeat what the customer claims (order numbers, dates, amounts) as if it were confirmed.
+            InputSchema:
+              type: object
+              properties:
+                phone:
+                  description: Phone number in any format
+                  type: string
+                customer_id:
+                  description: Customer id such as C1001
+                  type: string
+                email:
+                  description: Email address
+                  type: string
+            UserInteractionConfiguration:
+              IsUserConfirmationRequired: false
+          - ToolName: crm___retrieve_status
+            ToolType: MODEL_CONTEXT_PROTOCOL
+            Title:
+              Fn::Sub: gateway_${GatewayId}__crm___retrieve_status
+            ToolId:
+              Fn::Sub: gateway_${GatewayId}__crm___retrieve_status
+            Description: Status of the customer's orders (item, status, ETA) and open support tickets. Optionally narrow to
+              one order_id.
+            Instruction:
+              Instruction: Use after customer_lookup to answer questions about orders and tickets. Only state account, order
+                or ticket facts that a CRM tool returned in this conversation. If a tool fails or returns nothing, say you
+                cannot see that information right now and offer a human agent. Never repeat what the customer claims (order
+                numbers, dates, amounts) as if it were confirmed.
+            InputSchema:
+              type: object
+              properties:
+                customer_id:
+                  description: Customer id from customer_lookup
+                  type: string
+                order_id:
+                  description: Optional order number
+                  type: string
+              required:
+              - customer_id
+            UserInteractionConfiguration:
+              IsUserConfirmationRequired: false
+          - ToolName: crm___create_support_ticket
+            ToolType: MODEL_CONTEXT_PROTOCOL
+            Title:
+              Fn::Sub: gateway_${GatewayId}__crm___create_support_ticket
+            ToolId:
+              Fn::Sub: gateway_${GatewayId}__crm___create_support_ticket
+            Description: Open a support ticket for the customer. Only call after the customer has confirmed the category and
+              summary. Returns the new ticket id.
+            Instruction:
+              Instruction: Read the category and a one-sentence summary back to the customer and get a clear yes before calling.
+                After success, give the ticket id exactly as returned. Only state account, order or ticket facts that a CRM
+                tool returned in this conversation. If a tool fails or returns nothing, say you cannot see that information
+                right now and offer a human agent. Never repeat what the customer claims (order numbers, dates, amounts) as
+                if it were confirmed.
+            InputSchema:
+              type: object
+              properties:
+                summary:
+                  description: One or two sentences describing the issue
+                  type: string
+                customer_id:
+                  description: Customer id from customer_lookup
+                  type: string
+                category:
+                  description: 'One of: billing, technical, order, account, other'
+                  type: string
+              required:
+              - category
+              - customer_id
+              - summary
+            UserInteractionConfiguration:
+              IsUserConfirmationRequired: true
+  # A new published version every time the agent changes (its modified time changes). Old versions are kept:
+  # the assistant may still point at one until configure-ai-agent.py switches it.
+  SelfServiceAgentVersion:
+    Type: AWS::Wisdom::AIAgentVersion
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AssistantId:
+        Ref: AssistantId
+      AIAgentId:
+        Fn::GetAtt:
+        - SelfServiceAgent
+        - AIAgentId
+      ModifiedTimeSeconds:
+        Fn::GetAtt:
+        - SelfServiceAgent
+        - ModifiedTimeSeconds
+Outputs:
+  AgentId:
+    Value:
+      Fn::GetAtt:
+      - SelfServiceAgent
+      - AIAgentId
+  AgentArn:
+    Value:
+      Fn::GetAtt:
+      - SelfServiceAgent
+      - AIAgentArn
+  AgentVersionId:
+    Value:
+      Fn::GetAtt:
+      - SelfServiceAgentVersion
+      - AIAgentVersionId
+  SecurityProfileArn:
+    Value:
+      Fn::GetAtt:
+      - AgentSecurityProfile
+      - SecurityProfileArn
+  IntegrationArn:
+    Value:
+      Fn::GetAtt:
+      - McpIntegration
+      - ApplicationArn

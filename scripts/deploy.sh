@@ -144,6 +144,8 @@ for layer in $LAYERS; do
     say "Syncing knowledge base content"
     python3 "$ROOT/scripts/sync-knowledge.py" --tenant "$TENANT" --env "$ENVIRONMENT" || echo "(knowledge sync skipped)"
     python3 "$ROOT/scripts/seed-demo-crm.py" --tenant "$TENANT" --env "$ENVIRONMENT" || echo "(demo CRM seed skipped)"
+    say "Configuring the self-service AI agent"
+    python3 "$ROOT/scripts/configure-ai-agent.py" --tenant "$TENANT" --env "$ENVIRONMENT"
   fi
 done
 
