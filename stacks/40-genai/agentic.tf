@@ -21,6 +21,16 @@ variable "agent_gateway_authorizer" {
 
 locals {
   agentic = var.enable_agentic_tools
+
+  # Connect sends the gateway id as the JWT audience. The id exists only after the gateway is created, so it is
+  # read back from this layer's own previous state and applied on the next run (deploy.sh does a second pass).
+  gateway_audience = try(data.terraform_remote_state.self.outputs.agent_tools_gateway_id, "")
+}
+
+data "terraform_remote_state" "self" {
+  backend  = "s3"
+  config   = { bucket = var.state_bucket, key = "40-genai/terraform.tfstate", region = var.region }
+  defaults = { agent_tools_gateway_id = "" }
 }
 
 resource "aws_dynamodb_table" "crm" {
@@ -113,6 +123,7 @@ resource "aws_cloudformation_stack" "agent_tools_gateway" {
     AuthorizerType         = var.agent_gateway_authorizer
     # Connect instance OIDC issuer: only tokens signed by this instance are accepted.
     JwtDiscoveryUrl = "${local.c.access_url}/.well-known/openid-configuration"
+    AllowedAudience = local.gateway_audience
   }
 
   tags = { "serve7:component" = "agent-tools-gateway", "serve7:genai" = "agentic" }
@@ -131,6 +142,15 @@ output "agent_tools_lambda_name" {
 
 output "agent_tools_gateway_arn" {
   value = try(aws_cloudformation_stack.agent_tools_gateway[0].outputs["GatewayArn"], "")
+}
+
+output "agent_tools_gateway_id" {
+  value = try(aws_cloudformation_stack.agent_tools_gateway[0].outputs["GatewayId"], "")
+}
+
+# deploy.sh re-applies this layer while this is false (first create of a gateway).
+output "agent_tools_gateway_audience_ok" {
+  value = !local.agentic || try(aws_cloudformation_stack.agent_tools_gateway[0].parameters["AllowedAudience"], "") == try(aws_cloudformation_stack.agent_tools_gateway[0].outputs["GatewayId"], "-")
 }
 
 output "agent_tools_gateway_url" {

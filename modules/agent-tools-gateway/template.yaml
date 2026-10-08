@@ -25,9 +25,21 @@ Parameters:
     Type: String
     Default: ""
     Description: OIDC discovery URL, e.g. https://<alias>.my.connect.aws/.well-known/openid-configuration
+  AllowedAudience:
+    Type: String
+    Default: ""
+    Description: >-
+      This gateway's own id. Connect puts the gateway id in the JWT "aud" claim and the gateway must list it
+      under allowed audiences, otherwise every tool call fails. The id only exists after the first create, so
+      stacks/40-genai feeds it back on the next apply (deploy.sh does that second pass automatically).
+  McpProtocolVersion:
+    Type: String
+    Default: "2025-03-26"
+    Description: MCP protocol version Amazon Connect speaks; the gateway must support it.
 
 Conditions:
   UseJwt: !Equals [!Ref AuthorizerType, CUSTOM_JWT]
+  HasAudience: !Not [!Equals [!Ref AllowedAudience, ""]]
 
 Resources:
   GatewayRole:
@@ -61,20 +73,26 @@ Resources:
       Name: !Sub "${Prefix}-mcp"
       Description: Serve7 CRM tools for the Q in Connect orchestration agent
       ProtocolType: MCP
+      ProtocolConfiguration:
+        Mcp:
+          SupportedVersions: [!Ref McpProtocolVersion]
       AuthorizerType: !Ref AuthorizerType
       AuthorizerConfiguration: !If
         - UseJwt
-        - CustomJWTAuthorizer:
-            DiscoveryUrl: !Ref JwtDiscoveryUrl
-            # AgentCore requires at least one claim rule. Pin the issuer to this Connect instance
-            # (the discovery URL already restricts signing keys to it).
-            CustomClaims:
-              - InboundTokenClaimName: iss
-                InboundTokenClaimValueType: STRING
-                AuthorizingClaimMatchValue:
-                  ClaimMatchOperator: EQUALS
-                  ClaimMatchValue:
-                    MatchValueString: !Select [0, !Split ["/.well-known", !Ref JwtDiscoveryUrl]]
+        - CustomJWTAuthorizer: !If
+            - HasAudience
+            # Documented Connect setup: the instance discovery URL + this gateway's id as allowed audience.
+            - DiscoveryUrl: !Ref JwtDiscoveryUrl
+              AllowedAudience: [!Ref AllowedAudience]
+            # First create only (id not known yet): AgentCore needs at least one rule, so pin the issuer.
+            - DiscoveryUrl: !Ref JwtDiscoveryUrl
+              CustomClaims:
+                - InboundTokenClaimName: iss
+                  InboundTokenClaimValueType: STRING
+                  AuthorizingClaimMatchValue:
+                    ClaimMatchOperator: EQUALS
+                    ClaimMatchValue:
+                      MatchValueString: !Select [0, !Split ["/.well-known", !Ref JwtDiscoveryUrl]]
         - !Ref AWS::NoValue
       RoleArn: !GetAtt GatewayRole.Arn
 

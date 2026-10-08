@@ -136,6 +136,10 @@ for layer in $LAYERS; do
     [[ "$answer" =~ ^[Yy]$ ]] || { echo "Stopped before ${layer}."; exit 0; }
   fi
   terraform -chdir="$dir" apply -input=false tfplan
+  if [[ "$layer" == "40-genai" ]] && [[ "$(terraform -chdir="$dir" output -raw agent_tools_gateway_audience_ok 2>/dev/null || echo true)" == "false" ]]; then
+    say "Second pass: registering the new MCP gateway id as its JWT audience"
+    terraform -chdir="$dir" apply -input=false -auto-approve -var-file="$TFVARS" "${EXTRA_VARS[@]}" "${LAYER_VARS[@]}" -compact-warnings
+  fi
   if [[ "$layer" == "40-genai" ]]; then
     say "Syncing knowledge base content"
     python3 "$ROOT/scripts/sync-knowledge.py" --tenant "$TENANT" --env "$ENVIRONMENT" || echo "(knowledge sync skipped)"
