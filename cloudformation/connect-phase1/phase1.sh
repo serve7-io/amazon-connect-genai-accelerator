@@ -26,9 +26,18 @@ exists() { aws cloudformation describe-stacks --stack-name "$STACK" >/dev/null 2
 
 deploy() {
   say "Deploying $STACK to account $ACCOUNT, $REGION, instance alias '$ALIAS'"
+  # A stack whose first create failed (ROLLBACK_COMPLETE) can only be deleted: clear it automatically.
+  if [[ "$(aws cloudformation describe-stacks --stack-name "$STACK" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)" == "ROLLBACK_COMPLETE" ]]; then
+    echo "Removing the failed earlier attempt of $STACK first."
+    aws cloudformation delete-stack --stack-name "$STACK" && aws cloudformation wait stack-delete-complete --stack-name "$STACK"
+  fi
   if ! exists; then
     n=$(aws connect list-instances --query "length(InstanceSummaryList)" --output text)
-    echo "This account already has $n Connect instance(s); a new one is added (check the 'Instances' service quota if create fails)."
+    if [[ "$n" != "0" && "${ALLOW_EXTRA_INSTANCE:-0}" != "1" ]]; then
+      echo "STOP: account $ACCOUNT already has $n Connect instance(s). New accounts allow only 1, so this would fail."
+      echo "Run it in the lab account, or set ALLOW_EXTRA_INSTANCE=1 if this account's instance quota was raised."
+      exit 1
+    fi
   fi
   local params=("InstanceAlias=$ALIAS")
   [[ -n "${PHONE_COUNTRY:-}" ]] && params+=("PhoneCountryCode=$PHONE_COUNTRY")
