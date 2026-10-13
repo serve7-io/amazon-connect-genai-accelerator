@@ -131,6 +131,47 @@ for d in tenants:
         except (ValueError, KeyError, IndexError, AssertionError, TypeError) as e:
             err(name, f"demo-crm.json needs customers[0] with customer_id, phone and one order ({e!r})")
 
+# ---- optional data-tables.yaml
+VALUE_TYPES = {"TEXT", "NUMBER", "BOOLEAN", "TEXT_LIST", "NUMBER_LIST"}
+NAME_RE = re.compile(r"^[\w\- .:=@'|]{1,127}$")
+for d in tenants:
+    f = d / "data-tables.yaml"
+    if not f.exists():
+        continue
+    tables = (yaml.safe_load(f.read_text()) or {}).get("tables") or {}
+    if len(tables) > 100:
+        err(d.name, "data-tables.yaml: more than 100 tables (Connect default quota)")
+    for tn, tbl in tables.items():
+        where = f"data-tables.yaml {tn}"
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,60}", tn):
+            err(d.name, f"{where}: table names use letters, digits, _ and - (they become CloudFormation stack names)")
+        attrs = tbl.get("attributes") or []
+        names = [a.get("name", "") for a in attrs]
+        if not attrs:
+            err(d.name, f"{where}: needs attributes")
+        if len({n.lower() for n in names}) != len(names):
+            err(d.name, f"{where}: attribute names must be unique (case-insensitive)")
+        if len({re.sub(r"[^A-Za-z0-9]", "", n) for n in names}) != len(names):
+            err(d.name, f"{where}: attribute names must stay unique without spaces/punctuation (template logical ids)")
+        for a in attrs:
+            if str(a.get("type", "TEXT")).upper() not in VALUE_TYPES:
+                err(d.name, f"{where}: attribute {a.get('name')!r} type must be one of {sorted(VALUE_TYPES)}")
+            if not NAME_RE.match(a.get("name", "")):
+                err(d.name, f"{where}: invalid attribute name {a.get('name')!r}")
+        keys = [a["name"] for a in attrs if a.get("primary")]
+        seen = set()
+        for i, row in enumerate(tbl.get("rows") or []):
+            unknown = set(row) - set(names)
+            if unknown:
+                err(d.name, f"{where}: row {i + 1} has unknown attributes {sorted(unknown)}")
+            missing = [k for k in keys if row.get(k) in (None, "")]
+            if missing:
+                err(d.name, f"{where}: row {i + 1} is missing primary attributes {missing}")
+            pk = tuple(str(row.get(k)) for k in keys)
+            if keys and pk in seen:
+                err(d.name, f"{where}: row {i + 1} duplicates primary key {pk}")
+            seen.add(pk)
+
 print(f"checked {len(tenants)} tenant(s): {', '.join(p.name for p in tenants)}")
 if errors:
     print("\n".join(f"  FAIL {e}" for e in errors))
