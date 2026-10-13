@@ -140,6 +140,10 @@ for layer in $LAYERS; do
     say "Second pass: registering the new MCP gateway id as its JWT audience"
     terraform -chdir="$dir" apply -input=false -auto-approve -var-file="$TFVARS" "${EXTRA_VARS[@]}" "${LAYER_VARS[@]}" -compact-warnings
   fi
+  if [[ "$layer" == "30-routing" && -f "$ROOT/tenants/$TENANT/data-tables.yaml" ]]; then
+    say "Seeding data table rows (create-only: values edited in Connect are kept)"
+    python3 "$ROOT/scripts/sync-data-tables.py" --tenant "$TENANT" --env "$ENVIRONMENT" || echo "(data table seed had failures - see above)"
+  fi
   if [[ "$layer" == "40-genai" ]]; then
     say "Syncing knowledge base content"
     python3 "$ROOT/scripts/sync-knowledge.py" --tenant "$TENANT" --env "$ENVIRONMENT" || echo "(knowledge sync skipped)"
