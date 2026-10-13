@@ -178,6 +178,15 @@ Then layer 40 creates `s7-<t>-<env>-ai-agent-prompt` (AIPrompt + version) and po
 persona, or before the file exists, the agent keeps the AWS-managed prompt and Terraform shows a warning.
 Review a persona like any customer-facing text: no prices, legal promises or claims the client has not approved.
 
+## Data tables (optional, `tenants/<t>/data-tables.yaml`)
+
+Business-editable reference data for flows: prompts per language, emergency closures, routing switches.
+Copy `templates/tenant/data-tables.yaml.example` and edit it. Layer 30 deploys each table's schema as CloudFormation, and
+`deploy.sh` then seeds the rows **create-only**, so values that business users edit in Connect are kept.
+Force the YAML values with `python3 scripts/sync-data-tables.py --tenant <t> --overwrite`.
+The `s7-<t>-<env>-data-table-manager` Lambda is the backend for the Data Table Manager UI; see
+`docs/data-table-manager.md`.
+
 ## Removing a tenant
 
 ```bash
