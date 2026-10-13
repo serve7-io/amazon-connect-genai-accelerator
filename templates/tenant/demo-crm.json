@@ -1,0 +1,20 @@
+{
+  "_comment": "Fictional demo customers for {{COMPANY}}. Replace with demo data that fits the client (still fictional). 555-01xx numbers and example.com addresses are reserved for fiction. tests/smoke.py uses the first customer and its first order.",
+  "customers": [
+    {
+      "customer_id": "C1001", "first_name": "Ava", "last_name": "Martin", "tier": "gold",
+      "phone": "+14035550101", "email": "ava.martin@example.com",
+      "orders": [
+        { "order_id": "5001", "item": "Sample product A", "status": "shipped", "eta": "2026-12-01" },
+        { "order_id": "5002", "item": "Sample product B", "status": "processing", "eta": "2026-12-05" }
+      ]
+    },
+    {
+      "customer_id": "C1002", "first_name": "Noah", "last_name": "Singh", "tier": "standard",
+      "phone": "+14035550102", "email": "noah.singh@example.com",
+      "orders": [
+        { "order_id": "5003", "item": "Sample product C", "status": "delivered", "eta": "2026-11-20" }
+      ]
+    }
+  ]
+}

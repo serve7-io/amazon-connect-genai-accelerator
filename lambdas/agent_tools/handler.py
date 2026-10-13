@@ -32,7 +32,9 @@ log = logging.getLogger()
 log.setLevel(logging.INFO)
 
 TABLE = os.environ.get("CRM_TABLE", "")
-TICKET_CATEGORIES = {"billing", "technical", "order", "account", "other"}
+# Per tenant from tenants/<t>/agent.yaml (ticket_categories), set by stacks/40-genai/agentic.tf.
+TICKET_CATEGORIES = {c.strip().lower() for c in os.environ.get(
+    "TICKET_CATEGORIES", "billing,technical,order,account,other").split(",") if c.strip()} | {"other"}
 _table = None
 
 
