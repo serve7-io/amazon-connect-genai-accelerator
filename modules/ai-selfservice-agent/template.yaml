@@ -16,7 +16,16 @@ Parameters:
     Type: String
   OrchestrationPromptId:
     Type: String
-    Description: AWS-managed orchestration prompt (id:version) the agent uses
+    Description: Orchestration prompt (id:version) the agent uses - the AWS-managed one, or the tenant's own from
+      stacks/40-genai/agent.tf when tenants/<t>/agent.yaml has a persona
+  CustomerIdExample:
+    Type: String
+    Default: C1001
+    Description: Example customer id shown to the model (tenants/<t>/agent.yaml customer_id_example)
+  TicketCategories:
+    Type: String
+    Default: billing, technical, order, account, other
+    Description: Allowed support ticket categories, comma separated (tenants/<t>/agent.yaml ticket_categories)
   ProfilePermissions:
     Type: CommaDelimitedList
     Default: ''
@@ -593,7 +602,8 @@ Resources:
                   description: Phone number in any format
                   type: string
                 customer_id:
-                  description: Customer id such as C1001
+                  description:
+                    Fn::Sub: Customer id such as ${CustomerIdExample}
                   type: string
                 email:
                   description: Email address
@@ -650,7 +660,8 @@ Resources:
                   description: Customer id from customer_lookup
                   type: string
                 category:
-                  description: 'One of: billing, technical, order, account, other'
+                  description:
+                    Fn::Sub: 'One of: ${TicketCategories}'
                   type: string
               required:
               - category

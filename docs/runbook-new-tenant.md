@@ -159,6 +159,25 @@ The agent may only state account or order facts a CRM tool returned (tool instru
 
 Test: chat "I'm customer C1001, where is my order?" should answer with order 5001 (shipped) and 5002 (processing) from `demo-crm.json`.
 
+### Per-client agent: `agent.yaml` and `demo-crm.json`
+
+| File | Controls |
+|---|---|
+| `tenants/<t>/agent.yaml` | `company`, `assistant_name`, `persona` (brand voice and rules), `customer_id_example`, `ticket_categories` |
+| `tenants/<t>/demo-crm.json` | Fictional customers and orders the CRM tools return; the smoke test uses the first customer and order |
+| `tenants/<t>/knowledge/` | What the agent answers from the knowledge base (synced by `deploy.sh`) |
+
+A `persona` needs the tenant's own orchestration prompt. It is the AWS-managed `SelfServiceOrchestrationChat` text with
+the persona put at the start of the system message. Fetch that text once (from any account with the agent deployed) and commit it:
+
+```bash
+python3 scripts/fetch-orchestration-prompt.py --tenant sandbox    # writes modules/ai-selfservice-agent/prompts/*.json
+```
+
+Then layer 40 creates `s7-<t>-<env>-ai-agent-prompt` (AIPrompt + version) and points the agent at it. With an empty
+persona, or before the file exists, the agent keeps the AWS-managed prompt and Terraform shows a warning.
+Review a persona like any customer-facing text: no prices, legal promises or claims the client has not approved.
+
 ## Removing a tenant
 
 ```bash
