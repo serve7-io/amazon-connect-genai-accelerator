@@ -1,0 +1,43 @@
+# Optional: Amazon Connect data tables for this tenant (business-editable reference data used by flows).
+# Schema (tables + attributes) is deployed by layer 30 as code. Rows are SEED values: scripts/sync-data-tables.py adds
+# missing values and never overwrites what business users changed in Connect (use --overwrite to force).
+#
+# Attribute types: TEXT, NUMBER, BOOLEAN, TEXT_LIST, NUMBER_LIST. primary: true = part of the row key.
+# validation uses the CloudFormation names: MinLength, MaxLength, Minimum, Maximum, Enum: {Strict: true, Values: [...]}
+# In a flow: Data Table block -> Evaluate (query name, e.g. Prompts) -> $.DataTables.Prompts.WelcomeMessage
+tables:
+  IVR_Prompts_English:
+    description: English IVR prompts by department
+    time_zone: America/Toronto
+    attributes:
+      - { name: Department, type: TEXT, primary: true }
+      - { name: QueueName, type: TEXT, primary: true }
+      - { name: WelcomeMessage, type: TEXT, validation: { MaxLength: 500 } }
+      - { name: HoldMessage, type: TEXT, validation: { MaxLength: 500 } }
+      - { name: MaxRetries, type: NUMBER, validation: { Minimum: 0, Maximum: 10 } }
+    rows:
+      - { Department: Sales, QueueName: Sales_General, WelcomeMessage: "Thank you for calling Sales. How can we help?", HoldMessage: "Please hold for the next available agent.", MaxRetries: 3 }
+      - { Department: Support, QueueName: Support_Tier1, WelcomeMessage: "Welcome to Support.", HoldMessage: "Your call is important. An agent will be with you shortly.", MaxRetries: 5 }
+      - { Department: Billing, QueueName: Billing_Main, WelcomeMessage: "Welcome to Billing.", HoldMessage: "Please hold.", MaxRetries: 3 }
+
+  IVR_Prompts_French:
+    description: French IVR prompts by department
+    time_zone: America/Toronto
+    attributes:
+      - { name: Department, type: TEXT, primary: true }
+      - { name: QueueName, type: TEXT, primary: true }
+      - { name: WelcomeMessage, type: TEXT, validation: { MaxLength: 500 } }
+      - { name: HoldMessage, type: TEXT, validation: { MaxLength: 500 } }
+      - { name: MaxRetries, type: NUMBER, validation: { Minimum: 0, Maximum: 10 } }
+    rows:
+      - { Department: Sales, QueueName: Sales_General, WelcomeMessage: "Merci d'avoir appelé le service des ventes. Comment pouvons-nous vous aider?", HoldMessage: "Veuillez patienter, un agent vous répondra sous peu.", MaxRetries: 3 }
+
+  Emergency_Closures:
+    description: Flip Closed to true to play the closure message and skip the queue
+    time_zone: America/Toronto
+    attributes:
+      - { name: Site, type: TEXT, primary: true }
+      - { name: Closed, type: BOOLEAN }
+      - { name: Message, type: TEXT, validation: { MaxLength: 500 } }
+    rows:
+      - { Site: Main, Closed: false, Message: "Our contact centre is closed today due to an emergency. Please call back tomorrow." }
