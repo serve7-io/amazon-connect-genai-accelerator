@@ -1,0 +1,35 @@
+{
+  "_comment": "Fictional demo customers for Northwind Motorcycles (Serve7 demo). 555-01xx numbers and example.com addresses are reserved for fiction. tests/smoke.py uses the first customer and its first order.",
+  "customers": [
+    {
+      "customer_id": "NW1001", "first_name": "Jordan", "last_name": "Reyes", "tier": "gold",
+      "phone": "+14035550111", "email": "jordan.reyes@example.com",
+      "orders": [
+        { "order_id": "B2001", "item": "Northwind Trail 900 (new bike order)", "status": "arrived at dealership, ready for pickup", "eta": "2026-10-10" },
+        { "order_id": "P3001", "item": "Pannier rack and side cases", "status": "shipped", "eta": "2026-10-14" }
+      ]
+    },
+    {
+      "customer_id": "NW1002", "first_name": "Priya", "last_name": "Nair", "tier": "standard",
+      "phone": "+14035550112", "email": "priya.nair@example.com",
+      "orders": [
+        { "order_id": "S4001", "item": "6,000 km service booking - Northwind Street 650", "status": "booked for Oct 15, 10:00", "eta": "2026-10-15" }
+      ]
+    },
+    {
+      "customer_id": "NW1003", "first_name": "Sam", "last_name": "Okafor", "tier": "standard",
+      "phone": "+14035550113", "email": "sam.okafor@example.com",
+      "orders": [
+        { "order_id": "S4002", "item": "Warranty inspection - Northwind Volt (charging fault)", "status": "in the workshop, waiting for a part", "eta": "2026-10-17" },
+        { "order_id": "P3002", "item": "Volt home charger cable", "status": "special order, on the way", "eta": "2026-10-16" }
+      ]
+    },
+    {
+      "customer_id": "NW1004", "first_name": "Elena", "last_name": "Kowalski", "tier": "gold",
+      "phone": "+14035550114", "email": "elena.kowalski@example.com",
+      "orders": [
+        { "order_id": "B2002", "item": "Northwind Cruiser 1200 (new bike order)", "status": "in production, factory confirmed", "eta": "2026-11-20" }
+      ]
+    }
+  ]
+}
