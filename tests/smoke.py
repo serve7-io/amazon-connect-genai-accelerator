@@ -120,10 +120,16 @@ def main() -> None:
             def tool(name, **args):
                 r = lam.invoke(FunctionName=tools_fn, Payload=json.dumps({"__tool": name, **args}).encode())
                 return json.loads(r["Payload"].read() or b"{}")
-            who = tool("customer_lookup", phone="403-555-0101")
-            check("Agent tool customer_lookup finds demo customer", who.get("customer_id") == "C1001", json.dumps(who))
-            st = tool("retrieve_status", customer_id="C1001", order_id="5001")
-            check("Agent tool retrieve_status returns order", st.get("orders", [{}])[0].get("status") == "shipped", json.dumps(st)[:160])
+            # first customer + first order of tenants/<t>/demo-crm.json (what seed-demo-crm.py loaded)
+            crm_file = ROOT / "tenants" / args.tenant / "demo-crm.json"
+            demo = json.loads(crm_file.read_text())["customers"][0] if crm_file.exists() else {
+                "customer_id": "C1001", "phone": "+14035550101", "orders": [{"order_id": "5001", "status": "shipped"}]}
+            order = demo["orders"][0]
+            who = tool("customer_lookup", phone=demo["phone"])
+            check("Agent tool customer_lookup finds demo customer", who.get("customer_id") == demo["customer_id"], json.dumps(who))
+            st = tool("retrieve_status", customer_id=demo["customer_id"], order_id=order["order_id"])
+            check("Agent tool retrieve_status returns order", st.get("orders", [{}])[0].get("status") == order["status"],
+                  json.dumps(st)[:160])
             gw = s.client("cloudformation").describe_stacks(StackName=f"{prefix}-agent-tools-gateway")["Stacks"][0]
             check("AgentCore tools gateway stack healthy", gw["StackStatus"].endswith("_COMPLETE") and "ROLLBACK" not in gw["StackStatus"],
                   gw["StackStatus"])
