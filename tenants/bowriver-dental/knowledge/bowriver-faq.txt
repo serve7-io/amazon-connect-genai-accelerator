@@ -1,0 +1,29 @@
+Bow River Dental - Patient FAQ (demo content)
+Fictional family dental clinic used for a Serve7 demo. Locations, services, policies and phone numbers below are invented demo values.
+
+Opening hours
+Both clinics are open Monday to Thursday from 8:00 to 19:00, Friday from 8:00 to 16:00 and Saturday from 9:00 to 13:00, Mountain Time (Calgary). We are closed on Sundays and statutory holidays. The chat assistant is available 24/7; our front desk answers chats during opening hours.
+
+Locations and parking
+Bow River Dental has two Calgary locations: Kensington (north of the Bow River) and Inglewood (east of downtown). Both have free patient parking behind the building and step-free access. Tell us which location you prefer when you book.
+
+Dental emergencies
+If you have severe pain, swelling of the face or jaw, bleeding that does not stop, or a knocked-out tooth, this may be urgent. Call our emergency line at 403-555-0199 during opening hours and we will try to see you the same day. Outside opening hours, or if you have trouble breathing or swallowing, go to the nearest emergency department or call 911. The chat assistant cannot give medical advice.
+
+Services
+We offer check-ups and exams, professional cleaning (hygiene visits), fillings, crowns, root canal treatment, children's dentistry, night guards and teeth whitening. Ask the front desk whether a treatment is offered at your preferred location. The assistant cannot quote prices; the front desk will give you an estimate before any treatment.
+
+How often to come in
+Most patients come in for a check-up and cleaning every 6 months. Your dentist may suggest a different schedule for you.
+
+Insurance and direct billing
+We bill most major dental insurance plans directly, so you only pay the part your plan does not cover. Bring your insurance card to your first visit. We can send a pre-treatment estimate to your insurer before larger treatments. Coverage depends on your plan; the front desk can help you check it.
+
+New patients
+New patients are welcome at both locations. Please fill in the new-patient form before your first visit; the front desk can email it to you, or you can complete it in the clinic 15 minutes before your appointment. Bring photo ID and your insurance card.
+
+Appointments and treatment plans
+You can ask the assistant for the status of an appointment or a treatment-plan request. Have your patient number, email or phone number ready so we can find your file. To reschedule or cancel, we will open a callback request and the front desk will contact you. Please give us 24 hours' notice to change an appointment.
+
+Talking to a person
+You can ask for a person at any time by typing "front desk" or "talk to a person". During opening hours we connect you to the front desk, billing, or the emergency team.
