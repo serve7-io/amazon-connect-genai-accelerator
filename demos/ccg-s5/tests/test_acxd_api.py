@@ -22,6 +22,11 @@ def api(monkeypatch):
                               "postal_code": "K1A 0B1", "phone": "+16135550114", "sms_capable": True,
                               "vehicle": "2022 Honda CR-V"}}
     common.member = lambda mid: members.get(mid)
+    members["M-20481537"] = {"member_id": "M-20481537", "name": "Sarah Mitchell", "tier": "Plus", "phone": "+16135550152",
+                             "dob": "1986-04-22", "postal_code": "K7L 3N6", "vehicle": "2023 Honda CR-V",
+                             "vehicle_plate": "ON ABCD 123", "member_since": "2019", "open_cases": 0,
+                             "service_history": [{"date": "2025-03", "service": "Battery boost"}]}
+    common.T_MEMBERS = types.SimpleNamespace(scan=lambda **kw: {"Items": list(members.values())})
     common.now_iso = lambda: "2026-10-14T00:00:00+00:00"
     pol = {"policy_id": "AU-88214471", "member_id": "M-1001", "plan_type": "full_pay", "amount_due": "1284.60",
            "currency": "CAD", "status": "renewal_due", "line": "auto", "renewal_date": "2026-10-27"}
@@ -63,8 +68,28 @@ def test_payment_status_sees_keypad_attempts(api):
 
 def test_lookup_member_by_spoken_membership_number(api):
     assert call(api, "lookup_member", {"membership_number": "m 6042 5183"})[1] == {
-        "found": True, "member_id": "M-60425183", "first_name": "Thomas", "tier": "Plus", "vehicle": "2022 Honda CR-V"}
+        "found": True, "member_id": "M-60425183", "first_name": "Thomas", "tier": "Plus", "vehicle": "2022 Honda CR-V",
+        "vehicle_plate": "", "member_since": "", "service_history": [], "open_cases": 0}
     assert call(api, "lookup_member", {"membership_number": "123"})[1] == {"found": False}
+
+
+def test_lookup_member_by_phone_and_crm_fields(api):
+    """Scenario 1: 'membership number or the phone number on your account'."""
+    by_no = call(api, "lookup_member", {"membership_number": "M-20481537"})[1]
+    assert by_no["first_name"] == "Sarah" and by_no["vehicle"] == "2023 Honda CR-V" and by_no["member_since"] == "2019"
+    assert by_no["service_history"][0]["service"] == "Battery boost" and by_no["open_cases"] == 0
+    assert call(api, "lookup_member", {"phone": "(613) 555-0152"})[1]["member_id"] == "M-20481537"
+    assert call(api, "lookup_member", {"membership_number": "613 555 0152"})[1]["member_id"] == "M-20481537"
+    assert call(api, "lookup_member", {"phone": "613 555 0199"})[1] == {"found": False}
+
+
+def test_verify_service_level_by_vehicle(api):
+    """Scenario 1 security level for service requests: membership number + vehicle confirmation."""
+    ok = call(api, "verify_member", {"membership_number": "M-20481537", "interaction_type": "service",
+                                     "vehicle": "yes"})[1]
+    assert ok["verified"] and ok["level"] == "service"
+    assert call(api, "verify_member", {"membership_number": "M-20481537", "interaction_type": "service",
+                                       "vehicle": "a Ford F-150"})[1] == {"verified": False}
 
 
 @pytest.mark.parametrize("body,ok", [
