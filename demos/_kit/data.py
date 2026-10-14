@@ -4,6 +4,7 @@
     python3 demos/_kit/data.py <demo> status
     python3 demos/_kit/data.py <demo> seed            # only fills empty tables
     python3 demos/_kit/data.py <demo> reset           # wipe the tables and load data/seed.json again
+    python3 demos/_kit/data.py <demo> events          # read-only: stack status and the latest failed events
     python3 demos/_kit/data.py <demo> <command> ...   # demo-specific, from demos/<demo>/admin.py COMMANDS
 
 Tables are the stack outputs named in data/seed.json ("tables": {"<OutputName>": [rows]}).
@@ -86,6 +87,21 @@ def status(d, cfg):
                                     sort_keys=True, ensure_ascii=False))
 
 
+def events(d, cfg):
+    cf = boto3.client("cloudformation", region_name=cfg["region"])
+    try:
+        st = cf.describe_stacks(StackName=cfg["stack"])["Stacks"][0]
+        print(f"stack {cfg['stack']}: {st['StackStatus']} {st.get('StackStatusReason', '')}")
+    except Exception as e:  # noqa: BLE001
+        print(f"stack {cfg['stack']}: {e}")
+        return
+    evs = cf.describe_stack_events(StackName=cfg["stack"])["StackEvents"][:60]
+    for e in reversed(evs):
+        if "FAILED" in e["ResourceStatus"] or e["LogicalResourceId"] == cfg["stack"]:
+            print(f"{e['Timestamp']:%H:%M:%S} {e['LogicalResourceId']:<28} {e['ResourceStatus']:<22} "
+                  f"{e.get('ResourceStatusReason', '')}")
+
+
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
@@ -93,6 +109,8 @@ def main():
     cmd, args = sys.argv[2], sys.argv[3:]
     if cmd == "status":
         return status(d, cfg)
+    if cmd == "events":
+        return events(d, cfg)
     if cmd in ("seed", "reset"):
         return seed(d, cfg, reset=(cmd == "reset"))
     admin = d / "admin.py"
