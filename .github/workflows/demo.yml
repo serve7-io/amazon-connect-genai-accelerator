@@ -1,0 +1,143 @@
+name: demo
+# Serve7 demo kit (demos/<name>/ with demo.json), account 480315222980, ca-central-1.
+# Run by opening an issue titled  "demo: <command> <demo> [args]"  (Claude does this from chat), or Actions > Run workflow.
+#   deploy <demo>                 create/update the stack, seed empty tables, smoke test, print ACXD URLs
+#   delete <demo>                 remove the stack + data (issue body must contain: confirm delete <demo>)
+#   status <demo> | seed <demo> | reset <demo> | test <demo>
+#   <admin command> <demo> [args] from demos/<demo>/admin.py, e.g. "demo: set-price yamaha-moto mt07 70"
+# The output is posted as a comment and the issue is closed.
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "Command and arguments, e.g. 'deploy yamaha-moto' or 'set-price yamaha-moto mt07 70'"
+        required: true
+  pull_request:
+    paths: ["demos/**", "!demos/ccg-s5/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-${{ github.event_name == 'pull_request' && github.ref || 'ops' }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ca-central-1
+  AWS_DEFAULT_REGION: ca-central-1
+  CI_ROLE: arn:aws:iam::480315222980:role/serve7-ccg-s5-ci
+  ALLOWED_ACTORS: "milosjovanic-serve7"
+
+jobs:
+  test:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install -q pytest boto3 cfn-lint
+      - name: Tests and lint for every kit demo
+        run: |
+          set -e
+          for d in demos/*/demo.json; do
+            d=$(dirname "$d"); echo "== $d"
+            [ -d "$d/tests" ] && python -m pytest -q "$d/tests"
+            cfn-lint "$d/template.yaml"
+          done
+          for f in demos/_kit/*.sh; do bash -n "$f"; done
+
+  ops:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' && startsWith(github.event.issue.title, 'demo:'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
+      issues: write
+    steps:
+      - name: Parse and authorise the request
+        id: req
+        env:
+          EVENT: ${{ github.event_name }}
+          TITLE: ${{ github.event.issue.title }}
+          BODY: ${{ github.event.issue.body }}
+          AUTHOR: ${{ github.event.issue.user.login }}
+          ACTOR: ${{ github.actor }}
+          IN_CMD: ${{ inputs.command }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "issues" ]; then WHO="$AUTHOR"; LINE="${TITLE#demo:}"; else WHO="$ACTOR"; LINE="$IN_CMD"; fi
+          case " $ALLOWED_ACTORS " in *" $WHO "*) ;; *) echo "::error::$WHO may not run demo operations"; exit 1;; esac
+          read -r -a W <<< "$LINE"
+          CMD="${W[0]:-}"; DEMO="${W[1]:-}"; ARGS=("${W[@]:2}")
+          [[ "$CMD" =~ ^[a-z][a-z-]{1,24}$ ]] || { echo "::error::bad command"; exit 1; }
+          [[ "$DEMO" =~ ^[a-z0-9][a-z0-9-]{1,30}$ ]] || { echo "::error::bad demo name"; exit 1; }
+          (( ${#ARGS[@]} <= 4 )) || { echo "::error::too many arguments"; exit 1; }
+          for a in "${ARGS[@]}"; do [[ "$a" =~ ^[A-Za-z0-9._:-]{1,40}$ ]] || { echo "::error::bad argument"; exit 1; }; done
+          if [ "$CMD" = delete ]; then
+            if [ "$EVENT" = "issues" ]; then
+              grep -qiF "confirm delete $DEMO" <<< "$BODY" || { echo "::error::delete needs 'confirm delete $DEMO' in the issue body"; exit 1; }
+            fi
+          fi
+          { echo "cmd=$CMD"; echo "demo=$DEMO"; echo "args=${ARGS[*]}"; } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+      - name: Demo exists
+        env:
+          DEMO: ${{ steps.req.outputs.demo }}
+        run: test -f "demos/$DEMO/demo.json" || { echo "::error::no demos/$DEMO/demo.json"; exit 1; }
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install -q boto3 pytest cfn-lint
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        if: steps.req.outputs.cmd != 'test'
+        with:
+          role-to-assume: ${{ env.CI_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gh-demo-${{ github.run_id }}
+
+      - name: Run ${{ steps.req.outputs.cmd }} ${{ steps.req.outputs.demo }}
+        env:
+          CMD: ${{ steps.req.outputs.cmd }}
+          DEMO: ${{ steps.req.outputs.demo }}
+          ARGS: ${{ steps.req.outputs.args }}
+        run: |
+          set -o pipefail
+          run() {
+            case "$CMD" in
+              test)   python -m pytest -q "demos/$DEMO/tests" && cfn-lint "demos/$DEMO/template.yaml" && echo "lint OK" ;;
+              deploy) bash demos/_kit/deploy.sh "$DEMO" ;;
+              delete) CONFIRM="$DEMO" bash demos/_kit/delete.sh "$DEMO" ;;
+              *)      python3 demos/_kit/data.py "$DEMO" "$CMD" $ARGS ;;
+            esac
+          }
+          run 2>&1 | tee "$RUNNER_TEMP/out.txt"; rc=${PIPESTATUS[0]}
+          echo "$rc" > "$RUNNER_TEMP/rc.txt"; exit $rc
+
+      - name: Report on the issue
+        if: always() && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          N: ${{ github.event.issue.number }}
+          LINE: ${{ steps.req.outputs.cmd }} ${{ steps.req.outputs.demo }} ${{ steps.req.outputs.args }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          RC=$(cat "$RUNNER_TEMP/rc.txt" 2>/dev/null || echo "?")
+          STATUS=$([ "$RC" = "0" ] && echo "✅ succeeded" || echo "❌ failed (exit $RC)")
+          {
+            echo "**demo \`${LINE:-?}\`: $STATUS** · [run log]($URL)"
+            [ "$RC" = "?" ] && echo && echo "_Stopped before the command ran (request rejected, or AWS sign-in failed)._"
+            echo; echo '```'
+            tail -c 60000 "$RUNNER_TEMP/out.txt" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'
+            echo '```'
+          } > comment.md
+          gh issue comment "$N" --repo "$GITHUB_REPOSITORY" --body-file comment.md
+          gh issue close "$N" --repo "$GITHUB_REPOSITORY" --reason completed
