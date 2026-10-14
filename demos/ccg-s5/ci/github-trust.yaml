@@ -11,6 +11,10 @@ Parameters:
   GitHubRepo:
     Type: String
     Default: amazon-connect-genai-accelerator
+  GitHubRepoId:
+    Type: String
+    Default: "1409083841"
+    Description: Numeric repository id (immutable; pins the id-based OIDC subject to this exact repo)
   CreateOidcProvider:
     Type: String
     AllowedValues: ["true", "false"]
@@ -44,7 +48,10 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main
+              StringLike:     # main branch only; plain subject, or GitHub's immutable (id-pinned) subject
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}@*/${GitHubRepo}@${GitHubRepoId}:ref:refs/heads/main
       Policies:
         - PolicyName: ccg-s5-operate
           PolicyDocument:
