@@ -1,0 +1,530 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Serve7 - CCG RFP Scenario 5 (secure renewal payment), synthetic data only. Synthetic billing/policy store,
+  ACXD integrations API, payment Lambda (simulated gateway), and the Connect secure payment segment flow.
+  The ACXD main flow with the Agentic CX block is created in the console (see README) and passed back as ReturnFlowArn.
+
+Parameters:
+  Prefix:
+    Type: String
+    Default: ccg-s5
+    AllowedPattern: "[a-z0-9-]{3,20}"
+  ConnectInstanceArn:
+    Type: String
+    Description: arn:aws:connect:<region>:<account>:instance/<id>
+  CodeBucket:
+    Type: String
+    Description: S3 bucket holding the Lambda zips built by scripts/package.sh
+  CodeVersion:
+    Type: String
+    Default: v1
+    Description: S3 key prefix of the zips (change it to force a code update)
+  EncryptionKeyId:
+    Type: String
+    Description: Id of the public key uploaded to the Connect instance (Store customer input encryption)
+  EncryptionCertificate:
+    Type: String
+    NoEcho: true
+    Description: X.509 certificate (PEM, newlines as \n) signed by that key. Public material, but long.
+  PrivateKeySecretArn:
+    Type: String
+    Description: Secrets Manager secret holding the matching RSA private key (PEM). Created out of band.
+  ApiKeySecretArn:
+    Type: String
+    Description: Secrets Manager secret (plain string) used as the x-api-key of the ACXD integrations API.
+  ReturnFlowArn:
+    Type: String
+    Default: ""
+    Description: The ACXD main flow to return to after card entry. Empty = built-in result announcement flow.
+
+  PaymentPartnerMode:
+    Type: String
+    Default: simulated_vendor
+    AllowedValues: [native, simulated_vendor]
+    Description: >-
+      simulated_vendor = present the secure segment as a hand-over to a third-party PCI partner (PCI Pal / Sycurio
+      style) with a different voice and partner-shaped results. Simulated: no vendor is called. native = Connect only.
+  PaymentPartnerName:
+    Type: String
+    Default: our secure payment partner
+    Description: What the caller hears, e.g. "our secure payment partner". Label as simulated in the demo.
+  PartnerVoice:
+    Type: String
+    Default: Matthew
+    Description: Polly voice used while the caller is "with the partner", so the hand-over is audible.
+
+  SegmentStyle:
+    Type: String
+    Default: script
+    AllowedValues: [script, partner_handover]
+    Description: >-
+      script = CAA demo script wording (same voice, no hand-over announcement; the agent has already explained the
+      keypad step). partner_handover = announce a transfer to the payment partner with a different voice.
+
+  SmsEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      true = text the caller an SMS receipt after an approved payment (Amazon SNS, to the calling number).
+      In the SNS SMS sandbox only verified destination numbers receive it.
+
+Conditions:
+  SendSms: !Equals [!Ref SmsEnabled, "true"]
+  IsPartnerHandover: !Equals [!Ref SegmentStyle, partner_handover]
+  HasReturnFlow: !Not [!Equals [!Ref ReturnFlowArn, ""]]
+  IsSimulatedVendor: !Equals [!Ref PaymentPartnerMode, simulated_vendor]
+
+Resources:
+  # ---------- synthetic system of record (DynamoDB, PITR off: demo data only) ----------
+  MembersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Prefix}-members
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: member_id, AttributeType: S}]
+      KeySchema: [{AttributeName: member_id, KeyType: HASH}]
+      SSESpecification: {SSEEnabled: true}
+  PoliciesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Prefix}-policies
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: policy_id, AttributeType: S}
+        - {AttributeName: member_id, AttributeType: S}
+      KeySchema: [{AttributeName: policy_id, KeyType: HASH}]
+      GlobalSecondaryIndexes:
+        - IndexName: by_member
+          KeySchema: [{AttributeName: member_id, KeyType: HASH}]
+          Projection: {ProjectionType: ALL}
+      SSESpecification: {SSEEnabled: true}
+  MethodsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Prefix}-payment-methods
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: member_id, AttributeType: S}
+        - {AttributeName: token, AttributeType: S}
+      KeySchema: [{AttributeName: member_id, KeyType: HASH}, {AttributeName: token, KeyType: RANGE}]
+      SSESpecification: {SSEEnabled: true}
+  PaymentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Prefix}-payments
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: idempotency_key, AttributeType: S}]
+      KeySchema: [{AttributeName: idempotency_key, KeyType: HASH}]
+      SSESpecification: {SSEEnabled: true}
+  NotesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Prefix}-notes
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: policy_id, AttributeType: S}
+        - {AttributeName: created_at, AttributeType: S}
+      KeySchema: [{AttributeName: policy_id, KeyType: HASH}, {AttributeName: created_at, KeyType: RANGE}]
+      SSESpecification: {SSEEnabled: true}
+  VaultTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Prefix}-card-vault
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: contact_id, AttributeType: S}]
+      KeySchema: [{AttributeName: contact_id, KeyType: HASH}]
+      TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
+      SSESpecification: {SSEEnabled: true}
+  HandoffTable:   # ACXD agent -> Connect: which policy/member the keypad card entry is for (per contact, 1 h TTL)
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Prefix}-handoffs
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: contact_id, AttributeType: S}]
+      KeySchema: [{AttributeName: contact_id, KeyType: HASH}]
+      TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
+      SSESpecification: {SSEEnabled: true}
+
+  GatewayModeParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Prefix}/gateway-mode
+      Type: String
+      Value: normal
+      AllowedPattern: "^(normal|down|slow)$"
+      Description: Simulated payment gateway mode, flipped live for the 'payment system is down' objection.
+
+  # ---------- Lambdas ----------
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: data
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:Query, dynamodb:Scan]
+                Resource:
+                  - !GetAtt MembersTable.Arn
+                  - !GetAtt PoliciesTable.Arn
+                  - !Sub "${PoliciesTable.Arn}/index/*"
+                  - !GetAtt MethodsTable.Arn
+                  - !GetAtt PaymentsTable.Arn
+                  - !GetAtt NotesTable.Arn
+                  - !GetAtt VaultTable.Arn
+                  - !GetAtt HandoffTable.Arn
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${Prefix}/gateway-mode
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref PrivateKeySecretArn
+              - !If
+                - SendSms
+                - Effect: Allow            # SMS to a phone number has no resource ARN; topics are excluded below
+                  Action: sns:Publish
+                  NotResource: !Sub arn:${AWS::Partition}:sns:*:*:*
+                - !Ref AWS::NoValue
+
+  PaymentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${Prefix}-payment
+      Runtime: python3.13
+      Handler: handler.handler
+      Timeout: 8
+      MemorySize: 512
+      Role: !GetAtt LambdaRole.Arn
+      Code: {S3Bucket: !Ref CodeBucket, S3Key: !Sub "${CodeVersion}/payment.zip"}
+      Environment:
+        Variables:
+          MEMBERS_TABLE: !Ref MembersTable
+          POLICIES_TABLE: !Ref PoliciesTable
+          METHODS_TABLE: !Ref MethodsTable
+          PAYMENTS_TABLE: !Ref PaymentsTable
+          NOTES_TABLE: !Ref NotesTable
+          HANDOFF_TABLE: !Ref HandoffTable
+          SMS_ENABLED: !Ref SmsEnabled
+          VAULT_TABLE: !Ref VaultTable
+          GATEWAY_MODE_PARAM: !Ref GatewayModeParam
+          ENCRYPTION_KEY_ID: !Ref EncryptionKeyId
+          PARTNER_MODE: !Ref PaymentPartnerMode
+          PRIVATE_KEY_SECRET_ARN: !Ref PrivateKeySecretArn
+  PaymentFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PaymentFunction
+      Action: lambda:InvokeFunction
+      Principal: connect.amazonaws.com
+      SourceArn: !Ref ConnectInstanceArn
+      SourceAccount: !Ref AWS::AccountId
+  PaymentFunctionAssociation:
+    Type: AWS::Connect::IntegrationAssociation
+    Properties:
+      InstanceId: !Ref ConnectInstanceArn
+      IntegrationType: LAMBDA_FUNCTION
+      IntegrationArn: !GetAtt PaymentFunction.Arn
+
+  ApiFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${Prefix}-acxd-api
+      Runtime: python3.13
+      Handler: handler.handler
+      Timeout: 8
+      MemorySize: 256
+      Role: !GetAtt LambdaRole.Arn
+      Code: {S3Bucket: !Ref CodeBucket, S3Key: !Sub "${CodeVersion}/acxd_api.zip"}
+      Environment:
+        Variables:
+          MEMBERS_TABLE: !Ref MembersTable
+          POLICIES_TABLE: !Ref PoliciesTable
+          METHODS_TABLE: !Ref MethodsTable
+          PAYMENTS_TABLE: !Ref PaymentsTable
+          NOTES_TABLE: !Ref NotesTable
+          HANDOFF_TABLE: !Ref HandoffTable
+          SMS_ENABLED: !Ref SmsEnabled
+          GATEWAY_MODE_PARAM: !Ref GatewayModeParam
+          API_KEY: !Sub "{{resolve:secretsmanager:${ApiKeySecretArn}}}"
+  ApiFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt ApiFunction.Arn
+      AuthType: NONE   # protected by the x-api-key check; ACXD integrations call it over HTTPS
+  ApiFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+  ApiFunctionInvokeViaUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+  # ---------- Connect flows ----------
+  ResultFallbackFlow:
+    Type: AWS::Connect::ContactFlow
+    Properties:
+      InstanceArn: !Ref ConnectInstanceArn
+      Name: !Sub ${Prefix}-payment-result
+      Type: CONTACT_FLOW
+      Description: Announces the payment result when no ACXD return flow is configured (testing the secure segment alone).
+      Content: |
+        {
+          "Version": "2019-10-30",
+          "StartAction": "check",
+          "Actions": [
+            {"Identifier": "check", "Type": "Compare",
+             "Parameters": {"ComparisonValue": "$.Attributes.s5_payment_result"},
+             "Transitions": {"NextAction": "not-done",
+               "Conditions": [{"NextAction": "approved", "Condition": {"Operator": "Equals", "Operands": ["approved"]}}],
+               "Errors": [{"NextAction": "not-done", "ErrorType": "NoMatchingCondition"}]}},
+            {"Identifier": "approved", "Type": "MessageParticipant",
+             "Parameters": {"SSML": "<speak>Your payment was approved. Your confirmation number is <say-as interpret-as=\"characters\">$.Attributes.s5_confirmation</say-as>.</speak>"},
+             "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "not-done", "Type": "MessageParticipant",
+             "Parameters": {"Text": "The payment was not completed. Result: $.Attributes.s5_payment_result."},
+             "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "bye", "Type": "DisconnectParticipant", "Parameters": {}, "Transitions": {}}
+          ]
+        }
+
+  SecurePaymentFlow:
+    Type: AWS::Connect::ContactFlow
+    DependsOn: PaymentFunctionAssociation
+    Properties:
+      InstanceArn: !Ref ConnectInstanceArn
+      Name: !Sub ${Prefix}-secure-payment
+      Type: CONTACT_FLOW
+      Description: >-
+        PCI segment. Expects contact attributes s5_policy_id and s5_member_id. Pauses recording and analytics,
+        takes card, expiry and CVV by keypad (encrypted), charges once, resumes recording, returns to the ACXD flow.
+        Card values never reach contact attributes, logs or the AI application.
+      Content: !Sub
+        - |
+          {
+            "Version": "2019-10-30",
+            "StartAction": "flow-logging",
+            "Actions": [
+              {"Identifier": "flow-logging", "Type": "UpdateFlowLoggingBehavior",
+               "Parameters": {"FlowLoggingBehavior": "Enabled"}, "Transitions": {"NextAction": "partner-session"}},
+              {"Identifier": "partner-session", "Type": "InvokeLambdaFunction",
+               "Parameters": {"LambdaFunctionARN": "${PaymentFunction.Arn}", "InvocationTimeLimitSeconds": "8",
+                 "LambdaInvocationAttributes": {"action": "start_session", "policyId": "$.Attributes.s5_policy_id"},
+                 "ResponseValidation": {"ResponseType": "STRING_MAP"}},
+               "Transitions": {"NextAction": "save-session", "Errors": [{"NextAction": "fail-session", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "save-session", "Type": "UpdateContactAttributes",
+               "Parameters": {"TargetContact": "Current", "Attributes": {
+                 "s5_partner_mode": "$.External.partner_mode", "s5_partner_session_id": "$.External.partner_session_id",
+                 "s5_attempt": "1"}},
+               "Transitions": {"NextAction": "${AfterSession}", "Errors": [{"NextAction": "${AfterSession}", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "handover", "Type": "MessageParticipant",
+               "Parameters": {"Text": "${HandoverText}"},
+               "Transitions": {"NextAction": "recording-off", "Errors": [{"NextAction": "recording-off", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "recording-off", "Type": "UpdateContactRecordingBehavior",
+               "Parameters": {"RecordingBehavior": {"RecordedParticipants": [], "IVRRecordingBehavior": "Disabled"}},
+               "Transitions": {"NextAction": "${AfterRecordingOff}"}},
+              {"Identifier": "partner-voice", "Type": "UpdateContactTextToSpeechVoice",
+               "Parameters": {"TextToSpeechVoice": "${SegmentVoice}"},
+               "Transitions": {"NextAction": "intro", "Errors": [{"NextAction": "intro", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "intro", "Type": "MessageParticipant",
+               "Parameters": {"Text": "${IntroText}"},
+               "Transitions": {"NextAction": "pan", "Errors": [{"NextAction": "pan", "ErrorType": "NoMatchingError"}]}},
+
+              {"Identifier": "pan", "Type": "GetParticipantInput",
+               "Parameters": {"Text": "Please enter your 16-digit card number using your keypad now.", "StoreInput": "True",
+                 "InputTimeLimitSeconds": "20", "InputValidation": {"CustomValidation": {"MaximumLength": "16"}},
+                 "InputEncryption": {"EncryptionKeyId": "${EncryptionKeyId}", "Key": "${EncryptionCertificate}"}},
+               "Transitions": {"NextAction": "stash-pan", "Errors": [{"NextAction": "timeout", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "stash-pan", "Type": "InvokeLambdaFunction",
+               "Parameters": {"LambdaFunctionARN": "${PaymentFunction.Arn}", "InvocationTimeLimitSeconds": "8",
+                 "LambdaInvocationAttributes": {"action": "stash", "field": "pan", "value": "$.StoredCustomerInput"},
+                 "ResponseValidation": {"ResponseType": "STRING_MAP"}},
+               "Transitions": {"NextAction": "check-pan", "Errors": [{"NextAction": "fail-stash_pan", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "check-pan", "Type": "Compare", "Parameters": {"ComparisonValue": "$.External.result"},
+               "Transitions": {"NextAction": "timeout",
+                 "Conditions": [{"NextAction": "exp", "Condition": {"Operator": "Equals", "Operands": ["stashed"]}}],
+                 "Errors": [{"NextAction": "timeout", "ErrorType": "NoMatchingCondition"}]}},
+
+              {"Identifier": "exp", "Type": "GetParticipantInput",
+               "Parameters": {"Text": "Thank you. Now please enter the expiry date: two digits for the month, two digits for the year.", "StoreInput": "True",
+                 "InputTimeLimitSeconds": "12", "InputValidation": {"CustomValidation": {"MaximumLength": "4"}},
+                 "InputEncryption": {"EncryptionKeyId": "${EncryptionKeyId}", "Key": "${EncryptionCertificate}"}},
+               "Transitions": {"NextAction": "stash-exp", "Errors": [{"NextAction": "timeout", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "stash-exp", "Type": "InvokeLambdaFunction",
+               "Parameters": {"LambdaFunctionARN": "${PaymentFunction.Arn}", "InvocationTimeLimitSeconds": "8",
+                 "LambdaInvocationAttributes": {"action": "stash", "field": "exp", "value": "$.StoredCustomerInput"},
+                 "ResponseValidation": {"ResponseType": "STRING_MAP"}},
+               "Transitions": {"NextAction": "check-exp", "Errors": [{"NextAction": "fail-stash_exp", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "check-exp", "Type": "Compare", "Parameters": {"ComparisonValue": "$.External.result"},
+               "Transitions": {"NextAction": "timeout",
+                 "Conditions": [{"NextAction": "cvv", "Condition": {"Operator": "Equals", "Operands": ["stashed"]}}],
+                 "Errors": [{"NextAction": "timeout", "ErrorType": "NoMatchingCondition"}]}},
+
+              {"Identifier": "cvv", "Type": "GetParticipantInput",
+               "Parameters": {"Text": "And finally, please enter the three-digit security code on the back of your card.", "StoreInput": "True",
+                 "InputTimeLimitSeconds": "12", "InputValidation": {"CustomValidation": {"MaximumLength": "4"}},
+                 "InputEncryption": {"EncryptionKeyId": "${EncryptionKeyId}", "Key": "${EncryptionCertificate}"}},
+               "Transitions": {"NextAction": "stash-cvv", "Errors": [{"NextAction": "timeout", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "stash-cvv", "Type": "InvokeLambdaFunction",
+               "Parameters": {"LambdaFunctionARN": "${PaymentFunction.Arn}", "InvocationTimeLimitSeconds": "8",
+                 "LambdaInvocationAttributes": {"action": "stash", "field": "cvv", "value": "$.StoredCustomerInput"},
+                 "ResponseValidation": {"ResponseType": "STRING_MAP"}},
+               "Transitions": {"NextAction": "check-cvv", "Errors": [{"NextAction": "fail-stash_cvv", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "check-cvv", "Type": "Compare", "Parameters": {"ComparisonValue": "$.External.result"},
+               "Transitions": {"NextAction": "timeout",
+                 "Conditions": [{"NextAction": "processing", "Condition": {"Operator": "Equals", "Operands": ["stashed"]}}],
+                 "Errors": [{"NextAction": "timeout", "ErrorType": "NoMatchingCondition"}]}},
+
+              {"Identifier": "processing", "Type": "MessageParticipant",
+               "Parameters": {"Text": "Thank you. I'm processing your payment now."},
+               "Transitions": {"NextAction": "charge", "Errors": [{"NextAction": "charge", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "charge", "Type": "InvokeLambdaFunction",
+               "Parameters": {"LambdaFunctionARN": "${PaymentFunction.Arn}", "InvocationTimeLimitSeconds": "8",
+                 "LambdaInvocationAttributes": {"action": "charge", "policyId": "$.Attributes.s5_policy_id", "memberId": "$.Attributes.s5_member_id",
+                   "attempt": "$.Attributes.s5_attempt"},
+                 "ResponseValidation": {"ResponseType": "STRING_MAP"}},
+               "Transitions": {"NextAction": "save-result", "Errors": [{"NextAction": "fail-charge", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "save-result", "Type": "UpdateContactAttributes",
+               "Parameters": {"TargetContact": "Current", "Attributes": {
+                 "s5_payment_result": "$.External.result", "s5_confirmation": "$.External.confirmation",
+                 "s5_card_brand": "$.External.brand", "s5_card_last4": "$.External.last4", "s5_card_entry": "completed",
+                 "s5_partner_status": "$.External.partner_status", "s5_partner_transaction_id": "$.External.partner_transaction_id",
+                 "s5_partner_auth_code": "$.External.partner_auth_code", "s5_masked_pan": "$.External.masked_pan",
+                 "s5_amount_spoken": "$.External.amount_spoken", "s5_confirmation_spoken": "$.External.confirmation_spoken"}},
+               "Transitions": {"NextAction": "route-result", "Errors": [{"NextAction": "route-result", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "route-result", "Type": "Compare", "Parameters": {"ComparisonValue": "$.Attributes.s5_payment_result"},
+               "Transitions": {"NextAction": "recording-on",
+                 "Conditions": [
+                   {"NextAction": "say-approved", "Condition": {"Operator": "Equals", "Operands": ["approved"]}},
+                   {"NextAction": "say-declined", "Condition": {"Operator": "Equals", "Operands": ["declined"]}},
+                   {"NextAction": "say-invalid", "Condition": {"Operator": "Equals", "Operands": ["invalid_card"]}},
+                   {"NextAction": "say-expired", "Condition": {"Operator": "Equals", "Operands": ["card_expired"]}},
+                   {"NextAction": "say-incomplete", "Condition": {"Operator": "Equals", "Operands": ["input_incomplete"]}},
+                   {"NextAction": "say-unavailable", "Condition": {"Operator": "Equals", "Operands": ["gateway_unavailable"]}}],
+                 "Errors": [{"NextAction": "recording-on", "ErrorType": "NoMatchingCondition"}]}},
+              {"Identifier": "say-approved", "Type": "MessageParticipant",
+               "Parameters": {"Text": "Your payment of $.Attributes.s5_amount_spoken has been approved. Your confirmation number is $.Attributes.s5_confirmation_spoken."},
+               "Transitions": {"NextAction": "recording-on", "Errors": [{"NextAction": "recording-on", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "say-declined", "Type": "MessageParticipant",
+               "Parameters": {"Text": "Sorry, that card was declined."},
+               "Transitions": {"NextAction": "attempt-check", "Errors": [{"NextAction": "attempt-check", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "say-invalid", "Type": "MessageParticipant",
+               "Parameters": {"Text": "Sorry, that card number doesn't look right."},
+               "Transitions": {"NextAction": "attempt-check", "Errors": [{"NextAction": "attempt-check", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "say-expired", "Type": "MessageParticipant",
+               "Parameters": {"Text": "Sorry, that expiry date isn't valid, or the card has expired."},
+               "Transitions": {"NextAction": "attempt-check", "Errors": [{"NextAction": "attempt-check", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "say-incomplete", "Type": "MessageParticipant",
+               "Parameters": {"Text": "Sorry, we didn't receive all of the card details."},
+               "Transitions": {"NextAction": "attempt-check", "Errors": [{"NextAction": "attempt-check", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "say-unavailable", "Type": "MessageParticipant",
+               "Parameters": {"Text": "Sorry, the payment system isn't available right now, so your card was not charged."},
+               "Transitions": {"NextAction": "recording-on", "Errors": [{"NextAction": "recording-on", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "say-timeout", "Type": "MessageParticipant",
+               "Parameters": {"Text": "Sorry, we didn't get that."},
+               "Transitions": {"NextAction": "attempt-check", "Errors": [{"NextAction": "attempt-check", "ErrorType": "NoMatchingError"}]}},
+
+              {"Identifier": "attempt-check", "Type": "Compare", "Parameters": {"ComparisonValue": "$.Attributes.s5_attempt"},
+               "Transitions": {"NextAction": "give-up",
+                 "Conditions": [
+                   {"NextAction": "attempt-2", "Condition": {"Operator": "Equals", "Operands": ["1"]}},
+                   {"NextAction": "attempt-3", "Condition": {"Operator": "Equals", "Operands": ["2"]}}],
+                 "Errors": [{"NextAction": "give-up", "ErrorType": "NoMatchingCondition"}]}},
+              {"Identifier": "attempt-2", "Type": "UpdateContactAttributes",
+               "Parameters": {"TargetContact": "Current", "Attributes": {"s5_attempt": "2"}},
+               "Transitions": {"NextAction": "retry-2", "Errors": [{"NextAction": "give-up", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "retry-2", "Type": "MessageParticipant",
+               "Parameters": {"Text": "Let's try again. You can use the same card or a different one."},
+               "Transitions": {"NextAction": "pan", "Errors": [{"NextAction": "pan", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "attempt-3", "Type": "UpdateContactAttributes",
+               "Parameters": {"TargetContact": "Current", "Attributes": {"s5_attempt": "3"}},
+               "Transitions": {"NextAction": "retry-3", "Errors": [{"NextAction": "give-up", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "retry-3", "Type": "MessageParticipant",
+               "Parameters": {"Text": "Let's try one last time."},
+               "Transitions": {"NextAction": "pan", "Errors": [{"NextAction": "pan", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "give-up", "Type": "MessageParticipant",
+               "Parameters": {"Text": "We weren't able to take the payment by card, and nothing was charged. Let's look at other options."},
+               "Transitions": {"NextAction": "recording-on", "Errors": [{"NextAction": "recording-on", "ErrorType": "NoMatchingError"}]}},
+
+              {"Identifier": "timeout", "Type": "UpdateContactAttributes",
+               "Parameters": {"TargetContact": "Current", "Attributes": {"s5_payment_result": "input_timeout", "s5_card_entry": "not_completed"}},
+               "Transitions": {"NextAction": "say-timeout", "Errors": [{"NextAction": "say-timeout", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "fail-session", "Type": "UpdateContactAttributes",
+               "Parameters": {"TargetContact": "Current", "Attributes": {"s5_failed_step": "session"}},
+               "Transitions": {"NextAction": "fail", "Errors": [{"NextAction": "fail", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "fail-stash_pan", "Type": "UpdateContactAttributes",
+               "Parameters": {"TargetContact": "Current", "Attributes": {"s5_failed_step": "stash_pan"}},
+               "Transitions": {"NextAction": "fail", "Errors": [{"NextAction": "fail", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "fail-stash_exp", "Type": "UpdateContactAttributes",
+               "Parameters": {"TargetContact": "Current", "Attributes": {"s5_failed_step": "stash_exp"}},
+               "Transitions": {"NextAction": "fail", "Errors": [{"NextAction": "fail", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "fail-stash_cvv", "Type": "UpdateContactAttributes",
+               "Parameters": {"TargetContact": "Current", "Attributes": {"s5_failed_step": "stash_cvv"}},
+               "Transitions": {"NextAction": "fail", "Errors": [{"NextAction": "fail", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "fail-charge", "Type": "UpdateContactAttributes",
+               "Parameters": {"TargetContact": "Current", "Attributes": {"s5_failed_step": "charge"}},
+               "Transitions": {"NextAction": "fail", "Errors": [{"NextAction": "fail", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "fail", "Type": "UpdateContactAttributes",
+               "Parameters": {"TargetContact": "Current", "Attributes": {"s5_payment_result": "payment_error", "s5_card_entry": "not_completed"}},
+               "Transitions": {"NextAction": "recording-on", "Errors": [{"NextAction": "recording-on", "ErrorType": "NoMatchingError"}]}},
+
+              {"Identifier": "recording-on", "Type": "UpdateContactRecordingBehavior",
+               "Parameters": {"RecordingBehavior": {"RecordedParticipants": ["Agent", "Customer"], "IVRRecordingBehavior": "Enabled"},
+                 "AnalyticsBehavior": {"Enabled": "True", "AnalyticsLanguage": "en-US",
+                   "AnalyticsRedactionBehavior": "Enabled", "AnalyticsRedactionResults": "RedactedAndOriginal",
+                   "ChannelConfiguration": {"Voice": {"AnalyticsModes": ["RealTime", "AutomatedInteraction"]}}}},
+               "Transitions": {"NextAction": "main-voice"}},
+              {"Identifier": "main-voice", "Type": "UpdateContactTextToSpeechVoice",
+               "Parameters": {"TextToSpeechVoice": "Joanna"},
+               "Transitions": {"NextAction": "${AfterMainVoice}", "Errors": [{"NextAction": "${AfterMainVoice}", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "resumed", "Type": "MessageParticipant",
+               "Parameters": {"Text": "${ReturnText}"},
+               "Transitions": {"NextAction": "back", "Errors": [{"NextAction": "back", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "back", "Type": "TransferToFlow",
+               "Parameters": {"ContactFlowId": "${ReturnArn}"},
+               "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "bye", "Type": "DisconnectParticipant", "Parameters": {}, "Transitions": {}}
+            ]
+          }
+        - ReturnArn: !If [HasReturnFlow, !Ref ReturnFlowArn, !GetAtt ResultFallbackFlow.ContactFlowArn]
+          HandoverText: !If
+            - IsSimulatedVendor
+            - !Sub "For your security, I'm transferring you to ${PaymentPartnerName} to take your card details. You'll come back to me when you're done."
+            - "For your security, card details are entered on your keypad."
+          SegmentVoice: !If [IsSimulatedVendor, !Ref PartnerVoice, Joanna]
+          AfterSession: !If [IsPartnerHandover, handover, recording-off]
+          AfterRecordingOff: !If [IsPartnerHandover, partner-voice, pan]
+          AfterMainVoice: !If [IsPartnerHandover, resumed, back]
+          IntroText: !If
+            - IsSimulatedVendor
+            - !Sub "Welcome to ${PaymentPartnerName}'s secure payment line. This part of the call is not recorded, and your card details are not shared with the agent."
+            - "Recording is now paused. You'll enter your card details on your phone keypad; they are not heard or seen by anyone."
+          ReturnText: !If
+            - IsSimulatedVendor
+            - "You're back with CCG. Recording has resumed."
+            - "Recording has resumed."
+
+Outputs:
+  AcxdApiUrl:
+    Description: Base URL for the ACXD integrations (POST /verify_member, /get_policies, ...; header x-api-key)
+    Value: !GetAtt ApiFunctionUrl.FunctionUrl
+  SecurePaymentFlowArn:
+    Value: !GetAtt SecurePaymentFlow.ContactFlowArn
+  PaymentFunctionArn:
+    Value: !GetAtt PaymentFunction.Arn
+  GatewayModeParameter:
+    Value: !Ref GatewayModeParam
+  PaymentsTable:
+    Value: !Ref PaymentsTable
