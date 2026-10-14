@@ -19,9 +19,6 @@ Parameters:
     Type: String
     Default: ccg-s5-members
     Description: Shared CRM member table (Scenario 5 stack)
-  AttachmentsBucket:
-    Type: String
-    Default: s7-connect-phase1-storagebucket-yjfuv3mn3boh
   AcxdWorkspaceId:
     Type: String
     Default: f2e8e16b-df1e-4177-a3d8-42b833becf81
@@ -125,16 +122,9 @@ Resources:
       IntegrationType: LAMBDA_FUNCTION
       IntegrationArn: !GetAtt ApiFunction.Arn
 
-  # ---------- Connect: chat attachments, Roadside queue and routing ----------
-  AttachmentsStorage:
-    Type: AWS::Connect::InstanceStorageConfig
-    Properties:
-      InstanceArn: !Ref ConnectInstanceArn
-      ResourceType: ATTACHMENTS
-      StorageType: S3
-      S3Config:
-        BucketName: !Ref AttachmentsBucket
-        BucketPrefix: connect/serve7-ccg-demo-222980/Attachments
+  # ---------- Connect: Roadside queue and routing ----------
+  # Chat attachments are enabled once in the Connect console (Data storage > Attachments): Connect then updates its
+  # service-linked role, which the CI role is deliberately not allowed to do.
 
   RoadsideHours:
     Type: AWS::Connect::HoursOfOperation
