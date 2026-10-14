@@ -1,0 +1,82 @@
+{
+  "dataRequestId": "lookupmember",
+  "type": "object",
+  "webhook": {
+    "version": "v3",
+    "sendContext": true,
+    "implementation": "external",
+    "method": "POST",
+    "environments": {
+      "production": {
+        "url": "https://YOUR-ACXD-API-URL/lookup_member",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "dynamic": false,
+            "required": false
+          },
+          {
+            "key": "x-api-key",
+            "value": "{ccg_s5_api_key:NLX.Secret}",
+            "dynamic": false,
+            "required": false
+          }
+        ]
+      }
+    }
+  },
+  "description": "Finds the member by membership number (not a verification).",
+  "sensitive": false,
+  "streamStateModifications": false,
+  "requestSchema": {
+    "type": "object",
+    "properties": {
+      "membership_number": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "Membership number as the caller says it, e.g. M-60425183"
+      }
+    },
+    "isSensitive": false,
+    "title": "",
+    "description": ""
+  },
+  "responseSchema": {
+    "type": "object",
+    "properties": {
+      "found": {
+        "type": "boolean",
+        "isSensitive": false,
+        "title": "",
+        "description": "true or false"
+      },
+      "member_id": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "Use in later calls"
+      },
+      "first_name": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "tier": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "Basic, Plus or Premier"
+      }
+    },
+    "isSensitive": false,
+    "title": "",
+    "description": ""
+  },
+  "metadata": {
+    "path": "",
+    "tags": []
+  }
+}
