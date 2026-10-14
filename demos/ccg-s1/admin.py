@@ -2,6 +2,8 @@
 
   connect-info      read-only summary of the Connect instance (queues, routing profiles, users, storage,
                     chat/attachment settings, flows, approved origins). Nothing is changed.
+  add-persona       upsert ONLY the Scenario 1 persona (Sarah Mitchell, M-20481537) from demos/ccg-s5/data/synthetic.json
+                    into the shared CRM table ccg-s5-members. No other row, flow or stack is touched.
 """
 import json
 
@@ -72,4 +74,19 @@ def connect_info(table, scan):
         print("integrations:", type(e).__name__)
 
 
-COMMANDS = {"connect-info": connect_info}
+PERSONAS = ("M-20481537",)
+
+
+def add_persona(table, scan):
+    from decimal import Decimal
+    from pathlib import Path
+    data = json.loads((Path(__file__).resolve().parents[1] / "ccg-s5" / "data" / "synthetic.json").read_text(),
+                      parse_float=Decimal)
+    t = boto3.resource("dynamodb", region_name=REGION).Table("ccg-s5-members")
+    for m in data["members"]:
+        if m["member_id"] in PERSONAS:
+            t.put_item(Item=m)
+            print(f"upserted {m['member_id']} {m['name']} ({m.get('tier')}, {m.get('vehicle')})")
+
+
+COMMANDS = {"connect-info": connect_info, "add-persona": add_persona}
