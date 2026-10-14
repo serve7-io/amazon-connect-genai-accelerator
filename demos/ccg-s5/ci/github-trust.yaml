@@ -1,0 +1,102 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  CCG CAA Scenario 5 demo: lets GitHub Actions in serve7-io/amazon-connect-genai-accelerator (main branch only)
+  deploy and operate the ccg-s5 stack in this account through OIDC. No access keys.
+  Deploy once from CloudShell: bash demos/ccg-s5/ci/setup-github-trust.sh
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Default: serve7-io
+  GitHubRepo:
+    Type: String
+    Default: amazon-connect-genai-accelerator
+  CreateOidcProvider:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: false if this account already has the token.actions.githubusercontent.com provider.
+
+Conditions:
+  MakeProvider: !Equals [!Ref CreateOidcProvider, "true"]
+
+Resources:
+  GitHubOidc:
+    Type: AWS::IAM::OIDCProvider
+    Condition: MakeProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+
+  CiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: serve7-ccg-s5-ci
+      Description: GitHub Actions (main branch) deploys and operates the ccg-s5 demo stack
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main
+      Policies:
+        - PolicyName: ccg-s5-operate
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: StackAndServices
+                Effect: Allow
+                Action:
+                  - cloudformation:*
+                  - lambda:*
+                  - dynamodb:*
+                  - s3:*
+                  - logs:*
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:PutParameter
+                  - ssm:DeleteParameter
+                  - ssm:AddTagsToResource
+                  - secretsmanager:*
+                  - connect:*
+                  - sns:GetSMSAttributes
+                  - sts:GetCallerIdentity
+                Resource: "*"
+              - Sid: OnlyCcgS5Roles
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:PutRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:PassRole
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ccg-s5-*
+              - Sid: ReadOnlyIamForChecks
+                Effect: Allow
+                Action: [iam:ListRoles, iam:SimulatePrincipalPolicy, iam:GetRole]
+                Resource: "*"
+              - Sid: NoChangesToCiTrustItself
+                Effect: Deny
+                Action: ["iam:*"]
+                Resource:
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/serve7-ccg-s5-ci
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/*
+
+Outputs:
+  RoleArn:
+    Value: !GetAtt CiRole.Arn
