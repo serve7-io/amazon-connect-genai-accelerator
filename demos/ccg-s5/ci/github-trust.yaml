@@ -103,6 +103,28 @@ Resources:
                 Resource:
                   - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/serve7-ccg-s5-ci
                   - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/*
+        - PolicyName: demo-kit          # demos/_kit: stacks named demo-* create their own Lambda roles
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: OnlyDemoKitRoles
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:PutRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:PassRole
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/demo-*
 
 Outputs:
   RoleArn:
