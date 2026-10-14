@@ -1,0 +1,94 @@
+{
+  "dataRequestId": "preparecardentry",
+  "type": "object",
+  "webhook": {
+    "version": "v3",
+    "sendContext": true,
+    "implementation": "external",
+    "method": "POST",
+    "environments": {
+      "production": {
+        "url": "https://YOUR-ACXD-API-URL/prepare_card_entry",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "dynamic": false,
+            "required": false
+          },
+          {
+            "key": "x-api-key",
+            "value": "{ccg_s5_api_key:NLX.Secret}",
+            "dynamic": false,
+            "required": false
+          }
+        ]
+      }
+    }
+  },
+  "description": "Call right before exiting with collect_new_card: tells the phone system which policy the caller will pay with a new card on the keypad.",
+  "sensitive": false,
+  "streamStateModifications": false,
+  "requestSchema": {
+    "type": "object",
+    "properties": {
+      "contact_id": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "Context variable contact_id"
+      },
+      "policy_id": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "Full policy id from getpolicies"
+      },
+      "member_id": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "member_id from verifymember"
+      }
+    },
+    "isSensitive": false,
+    "title": "",
+    "description": ""
+  },
+  "responseSchema": {
+    "type": "object",
+    "properties": {
+      "ready": {
+        "type": "boolean",
+        "isSensitive": false,
+        "title": "",
+        "description": "true = exit with collect_new_card now"
+      },
+      "reason": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "not_payable or already_paid when ready is false"
+      },
+      "amount": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "currency": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      }
+    },
+    "isSensitive": false,
+    "title": "",
+    "description": ""
+  },
+  "metadata": {
+    "path": "",
+    "tags": []
+  }
+}
