@@ -6,7 +6,9 @@
   "lambda_dir": "lambdas/api",
   "seed": "data/seed.json",
   "acxd_secret": "ccg_s5_api_key",
-  "status_tables": [],
+  "status_tables": [
+    "CasesTable"
+  ],
   "instance_id": "78261fe2-310c-4f82-8437-4239487463ac",
   "tags": {
     "serve7:project": "ccg-rfp",

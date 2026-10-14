@@ -1,0 +1,98 @@
+{
+  "dataRequestId": "getcoverage",
+  "type": "object",
+  "webhook": {
+    "version": "v3",
+    "sendContext": true,
+    "implementation": "external",
+    "method": "POST",
+    "environments": {
+      "production": {
+        "url": "https://YOUR-API-URL/get_coverage",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "dynamic": false,
+            "required": false
+          },
+          {
+            "key": "x-api-key",
+            "value": "{ccg_s5_api_key:NLX.Secret}",
+            "dynamic": false,
+            "required": false
+          }
+        ]
+      }
+    }
+  },
+  "description": "Roadside coverage for the member's tier (tow km, covered services).",
+  "sensitive": false,
+  "streamStateModifications": false,
+  "requestSchema": {
+    "type": "object",
+    "properties": {
+      "member_id": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "member_id from lookupmember / verifymember"
+      }
+    },
+    "isSensitive": false,
+    "title": "",
+    "description": ""
+  },
+  "responseSchema": {
+    "type": "object",
+    "properties": {
+      "found": {
+        "type": "boolean",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "tier": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "tow_km": {
+        "type": "number",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "covered_services": {
+        "type": "array",
+        "isSensitive": false,
+        "title": "",
+        "description": "",
+        "items": {
+          "type": "object",
+          "isSensitive": false,
+          "title": "",
+          "description": ""
+        }
+      },
+      "tow_included_text": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "e.g. up to 200 km of towing at no charge"
+      }
+    },
+    "isSensitive": false,
+    "title": "",
+    "description": ""
+  },
+  "metadata": {
+    "path": "",
+    "tags": [
+      "serve7-demo",
+      "ccg-rfp",
+      "scenario-1"
+    ]
+  }
+}
