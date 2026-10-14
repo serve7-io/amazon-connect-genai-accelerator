@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Serve7 demo - Yamaha moto rental chat agent (Belgrade, EUR). Synthetic data only. Fleet and reservations tables
+  and the HTTPS API that the ACXD chat agent's data requests call. Deployed by demos/_kit/deploy.sh.
+
+Parameters:
+  CodeBucket:
+    Type: String
+  CodeKey:
+    Type: String
+  ApiKeySecretArn:
+    Type: String
+    Description: Secrets Manager secret (plain string) used as x-api-key. Shared by all kit demos.
+
+Resources:
+  FleetTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: unit_id, AttributeType: S}]
+      KeySchema: [{AttributeName: unit_id, KeyType: HASH}]
+      SSESpecification: {SSEEnabled: true}
+  ReservationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: confirmation, AttributeType: S}]
+      KeySchema: [{AttributeName: confirmation, KeyType: HASH}]
+      SSESpecification: {SSEEnabled: true}
+
+  ApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: data
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:Scan, dynamodb:Query]
+                Resource: [!GetAtt FleetTable.Arn, !GetAtt ReservationsTable.Arn]
+
+  ApiFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.13
+      Handler: handler.handler
+      Timeout: 8
+      MemorySize: 256
+      Role: !GetAtt ApiRole.Arn
+      Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
+      Environment:
+        Variables:
+          FLEET_TABLE: !Ref FleetTable
+          RESERVATIONS_TABLE: !Ref ReservationsTable
+          TZ: Europe/Belgrade
+          API_KEY: !Sub "{{resolve:secretsmanager:${ApiKeySecretArn}}}"
+  ApiFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt ApiFunction.Arn
+      AuthType: NONE   # protected by the x-api-key check; ACXD calls it over HTTPS
+  ApiUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+  ApiInvokeViaUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+Outputs:
+  AcxdApiUrl:
+    Value: !GetAtt ApiFunctionUrl.FunctionUrl
+  FleetTable:
+    Value: !Ref FleetTable
+  ReservationsTable:
+    Value: !Ref ReservationsTable
+  ApiFunctionName:
+    Value: !Ref ApiFunction
