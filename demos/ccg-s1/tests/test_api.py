@@ -1,85 +1,161 @@
-"""Offline tests for the CAA Scenario 1 roadside API (fake tables)."""
+"""Offline tests for ccg-s1-api (no AWS): an in-memory table fake replaces DynamoDB."""
 import json
 import sys
+import types
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-CID = "1b2c3d4e-0000-4000-8000-00000000abcd"
+SARAH = "M-20481537"
 
 
-class FakeTable:
-    def __init__(self, key, rows=()):
-        self.key, self.rows = key, {r[key]: dict(r) for r in rows}
+class FakeDb:
+    def __init__(self, seed):
+        self.rows = {name: [dict(r) for r in rows] for name, rows in seed["tables"].items()}
 
-    def get_item(self, Key):
-        r = self.rows.get(Key[self.key])
-        return {"Item": dict(r)} if r else {}
+    def _keys(self, table):
+        return self.h.KEYS[table]
 
-    def put_item(self, Item, **_):
-        self.rows[Item[self.key]] = dict(Item)
+    def get(self, table, key):
+        return next((r for r in self.rows[table] if all(r.get(k) == v for k, v in key.items())), None)
+
+    def put(self, table, item):
+        keys = self._keys(table)
+        self.rows[table] = [r for r in self.rows[table] if any(r.get(k) != item.get(k) for k in keys)] + [dict(item)]
+
+    def delete(self, table, key):
+        self.rows[table] = [r for r in self.rows[table] if any(r.get(k) != v for k, v in key.items())]
+
+    def query(self, table, attr, value, index=None):
+        return [r for r in self.rows[table] if r.get(attr) == value]
+
+    def scan(self, table):
+        return list(self.rows[table])
 
 
 @pytest.fixture()
 def api(monkeypatch):
     monkeypatch.setenv("API_KEY", "k")
-    sys.path.insert(0, str(ROOT / "lambdas" / "api")); sys.modules.pop("handler", None)
+    sys.path.insert(0, str(ROOT / "lambdas" / "api"))
+    sys.modules.pop("handler", None)
     import handler
-    handler.CASES = FakeTable("contact_id")
-    handler.MEMBERS = FakeTable("member_id", [
-        {"member_id": "M-20481537", "name": "Sarah Mitchell", "tier": "Plus", "vehicle": "2023 Honda CR-V"},
-        {"member_id": "M-70539261", "name": "Nadia Haddad", "tier": "Basic"}])
-    yield handler
+    fake = FakeDb(handler.SEED)
+    fake.h = handler
+    monkeypatch.setattr(handler, "DB", fake)
+    yield types.SimpleNamespace(h=handler, db=fake)
     sys.path.remove(str(ROOT / "lambdas" / "api"))
 
 
-def call(h, op, body, key="k"):
-    r = h.handler({"rawPath": f"/{op}", "headers": {"x-api-key": key}, "body": json.dumps(body),
-                   "requestContext": {"http": {"method": "POST"}}}, None)
+def call(api, op, body, key="k"):
+    r = api.h.handler({"headers": {"x-api-key": key}, "rawPath": "/" + op, "body": json.dumps(body),
+                       "requestContext": {"http": {"method": "POST"}}}, None)
     return r["statusCode"], json.loads(r["body"])
 
 
-def test_auth_health_and_page(api):
-    assert call(api, "get_coverage", {}, key="bad")[0] == 401
-    assert call(api, "health", {}, key="")[1]["ok"]
-    page = api.handler({"rawPath": "/", "requestContext": {"http": {"method": "GET"}}}, None)
-    assert page["statusCode"] == 200 and "DEMO" in page["body"] and "widget not configured" in page["body"]
+def test_every_success_and_error_has_a_message(api):
+    for op, body in [("lookupmember", {"member_id": SARAH}), ("lookupmember", {"member_id": "M-1"}),
+                     ("verifyservice", {"member_id": SARAH, "vehicle_confirmed": "2023 Honda CR-V"}),
+                     ("verifyservice", {"member_id": SARAH, "vehicle_confirmed": "Ford F-150"}),
+                     ("coverage", {"member_id": SARAH, "service": "tow"}), ("coverage", {"member_id": SARAH, "service": "x"}),
+                     ("dispatch", {"member_id": SARAH, "location": "Hwy 401 EB near Joyceville Rd"}),
+                     ("dispatch", {"member_id": SARAH}),
+                     ("writeback", {"contact_id": "c-1", "member_id": SARAH}), ("writeback", {}),
+                     ("reset", {"member_id": SARAH})]:
+        code, out = call(api, op, body)
+        assert code == 200 and out.get("message"), (op, body, out)
 
 
-def test_page_embeds_widget_when_configured(api, monkeypatch):
-    monkeypatch.setenv("WIDGET_ID", "w-1"); monkeypatch.setenv("WIDGET_SNIPPET_ID", "snip-1")
-    monkeypatch.setenv("WIDGET_SRC", "https://example.my.connect.aws/connectwidget/static/amazon-connect-chat-interface-client.js")
-    body = api.handler({"rawPath": "/", "requestContext": {"http": {"method": "GET"}}}, None)["body"]
-    assert "'w-1'" in body and "'snip-1'" in body and "amazon_connect('snippetId'" in body
+def test_lookup_by_member_id_and_by_phone(api):
+    out = call(api, "lookupmember", {"member_id": "m 2048 1537"})[1]
+    assert out["found"] and out["first_name"] == "Sarah" and out["tier"] == "Plus"
+    assert out["vehicle_spoken"] == "2023 Honda CR-V" and out["member_since"] == "2019"
+    assert out["prior_calls"] == 1 and out["last_service"] == "battery boost, March 2025" and out["open_cases"] == 0
+    assert "—" not in out["message"]
+    assert call(api, "lookupmember", {"phone": "(613) 555-0152"})[1]["member_id"] == SARAH
 
 
-def test_coverage_by_tier(api):
-    plus = call(api, "get_coverage", {"member_id": "M-20481537"})[1]
-    assert plus["tier"] == "Plus" and plus["tow_km"] == 200 and "200 km" in plus["tow_included_text"]
-    assert call(api, "get_coverage", {"membership_number": "70539261"})[1]["tow_km"] == 10
-    assert call(api, "get_coverage", {"member_id": "M-1"})[1] == {"found": False}
+def test_lookup_not_found_offers_alternatives(api):
+    out = call(api, "lookupmember", {"member_id": "M-99999999"})[1]
+    assert out == {"found": False, "error": "member_not_found", "valid_options": ["member_id", "phone"],
+                   "message": "I couldn't find that membership number. Could you check it, or give me the phone number on the account?"}
 
 
-def test_case_from_acxd_uses_context_contact_id_and_reaches_connect(api):
-    body = {"payload": {"contact_id": "made-up-by-model", "member_id": "M-20481537", "member_name": "Sarah Mitchell",
-                        "tier": "Plus", "vehicle": "2023 Honda CR-V", "verified": "true",
-                        "location": "Hwy 401 EB near Joyceville Rd, Kingston, ON", "service_type": "Flat tire / tow",
-                        "safe": "yes", "spare": "No spare", "passengers": "2 children", "photo_received": "yes",
-                        "concern": "Wants ETA; Sunday shop hours"},
-            "nlx_context": {"contact_id": CID}}
-    code, r = call(api, "create_roadside_case", body)
-    assert code == 200 and r["created"] and r["case_id"].startswith("RSA-") and r["priority"] == "Standard"
-    stored = api.CASES.rows[CID]
-    assert stored["verified"] and stored["photo_received"] and stored["safe"]
-    attrs = api.handler({"Details": {"ContactData": {"InitialContactId": CID, "ContactId": CID}}}, None)
-    assert attrs["found"] == "true" and attrs["s1_case_id"] == r["case_id"]
-    assert attrs["s1_verified"] == "Verified (service level)" and attrs["s1_photo"] == "Yes"
-    assert "Joyceville" in attrs["s1_summary"] and all(isinstance(v, str) for v in attrs.values())
+@pytest.mark.parametrize("body,ok", [
+    ({"interaction_type": "service", "vehicle_confirmed": "2023 Honda CR-V"}, True),
+    ({"interaction_type": "service", "vehicle_confirmed": "yes"}, True),
+    ({"interaction_type": "service", "vehicle_confirmed": "a Ford F-150"}, False),
+    ({"interaction_type": "account_change", "postal_code": "k7l3n6", "phone": "613-555-0152"}, True),
+    ({"interaction_type": "account_change", "postal_code": "K7L 3N6", "phone": "613-555-0199"}, False),
+    ({"interaction_type": "payment", "dob": "April 22 1986", "postal_code": "K7L 3N6"}, True),
+    ({"interaction_type": "payment", "dob": "1986-04-23", "postal_code": "K7L 3N6"}, False),
+])
+def test_verifyservice_rule_table(api, body, ok):
+    out = call(api, "verifyservice", {"member_id": SARAH, **body})[1]
+    assert out["verified"] is ok
+    if ok:
+        assert out["auth_level"] == body["interaction_type"]
+    else:
+        assert out["error"] == "not_verified" and "vehicle" not in out["message"].lower()  # never names the factor
 
 
-def test_unsafe_is_high_priority_and_missing_ids(api):
-    body = {"member_id": "M-20481537", "safe": "no", "contact_id": CID}
-    assert call(api, "create_roadside_case", body)[1]["priority"] == "High"
-    assert call(api, "create_roadside_case", {"member_id": "M-20481537"})[1] == {"created": False, "reason": "no_contact_id"}
-    assert api.handler({"Details": {"ContactData": {"InitialContactId": "x"}}}, None) == {"found": "false"}
+def test_verifyservice_missing_and_unknown_type(api):
+    assert call(api, "verifyservice", {"member_id": SARAH})[1]["valid_options"] == ["vehicle_confirmed"]
+    assert call(api, "verifyservice", {"member_id": SARAH, "interaction_type": "x"})[1]["error"] == "unknown_interaction_type"
+
+
+def test_coverage_plus_tow_matches_script(api):
+    out = call(api, "coverage", {"member_id": SARAH, "service": "tow"})[1]
+    assert out["covered"] and out["tow_km_included"] == 200 and out["cost_to_member"] == 0
+    assert out["message"] == "Your Plus membership covers up to 200 km of towing at no charge."
+    assert out["demo_value"] is False
+    assert call(api, "coverage", {"member_id": "M-31570264"})[1]["demo_value"] is True
+
+
+def test_dispatch_writes_record_and_returns_script_values(api):
+    out = call(api, "dispatch", {"member_id": SARAH, "location": "Hwy 401 EB near Joyceville Rd, Kingston",
+                                 "service": "tow", "destination": "nearest_certified"})[1]
+    assert out["provider"] == "Kingston Auto Services" and out["driver"] == "Mike T."
+    assert (out["eta_min_low"], out["eta_min_high"]) == (25, 30)
+    assert out["destination"] == "certified repair shop, Princess Street, Kingston"
+    assert api.db.get("DispatchesTable", {"dispatch_id": out["dispatch_id"]})["member_id"] == SARAH
+
+
+def test_writeback_and_reset(api):
+    d = call(api, "dispatch", {"member_id": SARAH, "location": "Hwy 401"})[1]
+    w = call(api, "writeback", {"contact_id": "c-1", "member_id": SARAH, "disposition": "Roadside, Tow Dispatched",
+                                "dispatch_id": d["dispatch_id"], "summary": "Flat tire, no spare."})[1]
+    assert w["written"] and w["record_id"].startswith("SN-INC")
+    api.db.put("MembersTable", {**api.db.get("MembersTable", {"member_id": SARAH}), "open_cases": 3})
+    r = call(api, "reset", {"member_id": SARAH})[1]
+    assert r["ok"] and r["removed"] == 2
+    assert api.db.get("MembersTable", {"member_id": SARAH})["open_cases"] == 0
+    assert api.db.scan("DispatchesTable") == [] and api.db.scan("ServiceRecordsTable") == []
+
+
+def test_connect_invoke_returns_flat_string_map(api):
+    ev = {"Details": {"Parameters": {"op": "lookupmember"},
+                      "ContactData": {"ContactId": "c-9", "Attributes": {"s1_member_id": SARAH}}}}
+    out = api.h.handler(ev, None)
+    assert all(isinstance(v, str) for v in out.values())
+    assert out["found"] == "true" and out["prior_calls"] == "1" and out["first_name"] == "Sarah"
+    out = api.h.handler({"Details": {"Parameters": {"op": "dispatch", "location": "Hwy 401"},
+                                     "ContactData": {"ContactId": "c-9", "Attributes": {"s1_member_id": SARAH}}}}, None)
+    assert out["dispatched"] == "true" and out["driver"] == "Mike T."
+    assert api.h.handler({"Details": {"Parameters": {"op": "nope"}}}, None)["error"] == "unknown_operation"
+
+
+def test_key_health_portal_and_context_contact_id(api):
+    assert call(api, "lookupmember", {"member_id": SARAH}, key="wrong")[0] == 401
+    h = api.h.handler({"rawPath": "/health", "requestContext": {"http": {"method": "POST"}}}, None)
+    assert json.loads(h["body"])["units"] == 3
+    page = api.h.handler({"rawPath": "/", "requestContext": {"http": {"method": "GET"}}}, None)
+    assert page["statusCode"] == 200 and "CAA Club Group" in page["body"]
+    cid = "0f8fad5b-d9cb-469f-a165-70867728950e"
+    out = call(api, "writeback", {"contact_id": "{contact_id}", "member_id": SARAH, "nlx_context": {"v": {"contact_id": cid}}})[1]
+    assert api.db.get("ServiceRecordsTable", {"contact_id": cid})["record_id"] == out["record_id"]
+
+
+def test_customer_facing_text_has_no_em_dashes(api):
+    src = (ROOT / "lambdas" / "api" / "handler.py").read_text()
+    assert "—" not in src
