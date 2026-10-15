@@ -5,6 +5,7 @@
   flow-snapshot     READ-ONLY: ccg-s5 stack parameters/status and the live content of ccg-s5-main and
                     ccg-s5-secure-payment (last modified time, block count, keypad settings, full JSON). Changes nothing.
                     Optional flow names: demo: flow-snapshot ccg-s1 <flow name> (names without spaces).
+  selftest          live check of ccg-s1-api through the Connect invoke path (no API key needed), then resets Sarah.
   set-proficiency   after Milos creates james.rivera in the console: Roadside Agents routing profile and the
                     roadside_dispatch proficiency (certified, level 5). Changes only that user.
 """
@@ -144,4 +145,42 @@ def set_proficiency(table, scan, username="james.rivera"):
     print(f"{username}: routing profile Roadside Agents, proficiency roadside_dispatch=certified level 5")
 
 
-COMMANDS = {"connect-info": connect_info, "flow-snapshot": s5_snapshot, "set-proficiency": set_proficiency}
+def selftest(table, scan):
+    """Live check without the API key: invoke ccg-s1-api with Connect-shaped events against the real tables
+    (lookup by id and by phone, verify, coverage, dispatch, writeback), then reset Sarah. Also shows that the
+    ccg-s5 stack was not updated by this deploy. Touches only ccg-s1-* rows for M-20481537."""
+    lam = boto3.client("lambda", region_name=REGION)
+
+    def call(op, **params):
+        ev = {"Details": {"Parameters": {"op": op, **params},
+                          "ContactData": {"ContactId": "selftest-0000", "Attributes": {}}}}
+        out = json.loads(lam.invoke(FunctionName="ccg-s1-api", Payload=json.dumps(ev).encode())["Payload"].read())
+        print(f"  {op:<14} {json.dumps(params)[:70]:<72} -> {json.dumps(out)[:400]}")
+        return out
+
+    fails = 0
+    checks = [
+        (call("lookupmember", member_id="M-20481537"), lambda o: o.get("found") == "true" and o.get("prior_calls") == "1"),
+        (call("lookupmember", phone="613 555 0152"), lambda o: o.get("member_id") == "M-20481537"),
+        (call("lookupmember", member_id="M-99999999"), lambda o: o.get("error") == "member_not_found"),
+        (call("verifyservice", member_id="M-20481537", vehicle_confirmed="Honda CR-V"), lambda o: o.get("verified") == "true"),
+        (call("verifyservice", member_id="M-20481537", vehicle_confirmed="Ford"), lambda o: o.get("verified") == "false"),
+        (call("coverage", member_id="M-20481537", service="tow"), lambda o: o.get("tow_km_included") == "200"),
+    ]
+    d = call("dispatch", member_id="M-20481537", location="Hwy 401 EB near Joyceville Rd, Kingston", service="tow")
+    checks.append((d, lambda o: o.get("driver") == "Mike T." and o.get("eta_min_low") == "25"))
+    w = call("writeback", member_id="M-20481537", disposition="Roadside, Tow Dispatched",
+             dispatch_id=d.get("dispatch_id", ""), summary="selftest")
+    checks.append((w, lambda o: o.get("written") == "true"))
+    checks.append((call("reset", member_id="M-20481537"), lambda o: o.get("ok") == "true" and o.get("removed") == "2"))
+    for out, ok in checks:
+        fails += not ok(out)
+    cf = boto3.client("cloudformation", region_name=REGION)
+    st = cf.describe_stacks(StackName="ccg-s5")["Stacks"][0]
+    print(f"\nccg-s5 stack: {st['StackStatus']} last updated {st.get('LastUpdatedTime')} (expected 2026-10-14 17:11 UTC)")
+    print(f"\n{len(checks) - fails}/{len(checks)} checks passed")
+    if fails:
+        raise SystemExit(1)
+
+
+COMMANDS = {"selftest": selftest, "connect-info": connect_info, "flow-snapshot": s5_snapshot, "set-proficiency": set_proficiency}
