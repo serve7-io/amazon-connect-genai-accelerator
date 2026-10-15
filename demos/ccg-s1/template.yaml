@@ -260,6 +260,141 @@ Resources:
         - {Delay: 0, Priority: 1, QueueReference: {Channel: CHAT, QueueArn: !GetAtt RoadsideQueue.QueueArn}}
         - {Delay: 0, Priority: 1, QueueReference: {Channel: VOICE, QueueArn: !GetAtt RoadsideQueue.QueueArn}}
 
+  # ---------- Phase B: agent step-by-step guide (opens for James when the chat is offered) ----------
+  # AWS managed views (form, confirmation). Member card -> Initiate Dispatch -> dispatch result -> after contact work
+  # (disposition + summary) -> mock ServiceNow write-back. The chat flow hooks it with Set event flow (DefaultAgentUI).
+  GuideFlow:
+    Type: AWS::Connect::ContactFlow
+    DependsOn: ConnectLambdaAssociation
+    Properties:
+      InstanceArn: !Ref ConnectInstanceArn
+      Name: ccg-s1-guide-roadside
+      Type: CONTACT_FLOW
+      Description: >-
+        CAA Scenario 1 step-by-step guide "Roadside Tow Request": member card with Verified and Standard badges,
+        pre-filled case fields, Initiate Dispatch (ccg-s1-api dispatch), confirmation, then after contact work with
+        write-back to the mock ServiceNow (ccg-s1-api writeback).
+      Content: !Sub
+        - |
+          {
+            "Version": "2019-10-30",
+            "StartAction": "member",
+            "Actions": [
+              {"Identifier": "member", "Type": "InvokeLambdaFunction",
+               "Parameters": {"LambdaFunctionARN": "${ApiFunction.Arn}", "InvocationTimeLimitSeconds": "8",
+                 "LambdaInvocationAttributes": {"op": "lookupmember", "member_id": "$.Attributes.s1_member_id"},
+                 "ResponseValidation": {"ResponseType": "STRING_MAP"}},
+               "Transitions": {"NextAction": "card", "Errors": [{"NextAction": "card", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "card", "Type": "ShowView",
+               "Parameters": {"ViewResource": {"Id": "${FormView}"}, "InvocationTimeLimitSeconds": "1800",
+                 "ViewData": {
+                   "Heading": "Roadside Tow Request",
+                   "SubHeading": "$.External.agent_note",
+                   "AttributeBar": [
+                     {"Label": "Member", "Value": "$.External.first_name"},
+                     {"Label": "Membership", "Value": "$.Attributes.s1_member_id", "Copyable": true},
+                     {"Label": "Tier", "Value": "$.External.tier"},
+                     {"Label": "Identity", "Value": "$.Attributes.s1_auth"},
+                     {"Label": "Priority", "Value": "Standard"},
+                     {"Label": "Vehicle", "Value": "$.External.vehicle_spoken"}
+                   ],
+                   "Sections": [
+                     {"_id": "case", "Type": "FormSection", "Heading": "Case details (from the AI intake)",
+                      "Items": [{"LayoutConfiguration": {"Grid": [{"colspan": {"default": "12", "xs": "6"}}, {"colspan": {"default": "12", "xs": "6"}}]},
+                        "Items": [
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Reason", "Name": "reason", "DefaultValue": "Flat tire / Tow"},
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Location", "Name": "location", "DefaultValue": "$.Attributes.s1_location"},
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Safety", "Name": "safety", "DefaultValue": "$.Attributes.s1_safety"},
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Spare tire", "Name": "spare", "DefaultValue": "$.Attributes.s1_spare"},
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Repair shop", "Name": "shop", "DefaultValue": "Nearest certified facility"},
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "AI summary", "Name": "summary", "DefaultValue": "$.Attributes.s1_summary"}
+                        ]}]}
+                   ],
+                   "Next": {"Label": "Initiate Dispatch"},
+                   "Cancel": {"Label": "Skip"}
+                 }},
+               "Transitions": {"NextAction": "dispatch",
+                 "Conditions": [{"NextAction": "acw", "Condition": {"Operator": "Equals", "Operands": ["Cancel"]}}],
+                 "Errors": [{"NextAction": "dispatch", "ErrorType": "NoMatchingCondition"},
+                            {"NextAction": "end", "ErrorType": "NoMatchingError"},
+                            {"NextAction": "end", "ErrorType": "TimeLimitExceeded"}]}},
+              {"Identifier": "dispatch", "Type": "InvokeLambdaFunction",
+               "Parameters": {"LambdaFunctionARN": "${ApiFunction.Arn}", "InvocationTimeLimitSeconds": "8",
+                 "LambdaInvocationAttributes": {"op": "dispatch", "member_id": "$.Attributes.s1_member_id",
+                   "location": "$.Views.ViewResultData.FormData.location", "service": "tow", "destination": "nearest_certified"},
+                 "ResponseValidation": {"ResponseType": "STRING_MAP"}},
+               "Transitions": {"NextAction": "save-dispatch", "Errors": [{"NextAction": "acw", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "save-dispatch", "Type": "UpdateContactAttributes",
+               "Parameters": {"TargetContact": "Current", "Attributes": {
+                 "s1_dispatch_id": "$.External.dispatch_id", "s1_dispatch_provider": "$.External.provider",
+                 "s1_dispatch_driver": "$.External.driver", "s1_dispatch_eta": "$.External.eta_min_low",
+                 "s1_dispatch_eta_high": "$.External.eta_min_high", "s1_dispatch_destination": "$.External.destination",
+                 "s1_dispatch_message": "$.External.message"}},
+               "Transitions": {"NextAction": "dispatched", "Errors": [{"NextAction": "dispatched", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "dispatched", "Type": "ShowView",
+               "Parameters": {"ViewResource": {"Id": "${ConfirmationView}"}, "InvocationTimeLimitSeconds": "1800",
+                 "ViewData": {
+                   "Graphic": {"Include": true},
+                   "Heading": "$.Attributes.s1_dispatch_message",
+                   "SubHeading": "Tell the member the driver's name and ETA. Then finish the case.",
+                   "AttributeBar": [
+                     {"Label": "Dispatch", "Value": "$.Attributes.s1_dispatch_id", "Copyable": true},
+                     {"Label": "Provider", "Value": "$.Attributes.s1_dispatch_provider"},
+                     {"Label": "Driver", "Value": "$.Attributes.s1_dispatch_driver"}
+                   ],
+                   "Next": {"Label": "After contact work"}
+                 }},
+               "Transitions": {"NextAction": "acw",
+                 "Errors": [{"NextAction": "acw", "ErrorType": "NoMatchingCondition"},
+                            {"NextAction": "acw", "ErrorType": "NoMatchingError"},
+                            {"NextAction": "end", "ErrorType": "TimeLimitExceeded"}]}},
+              {"Identifier": "acw", "Type": "ShowView",
+               "Parameters": {"ViewResource": {"Id": "${FormView}"}, "InvocationTimeLimitSeconds": "1800",
+                 "ViewData": {
+                   "Heading": "After contact work",
+                   "SubHeading": "Review, then submit to ServiceNow.",
+                   "AttributeBar": [
+                     {"Label": "Membership", "Value": "$.Attributes.s1_member_id"},
+                     {"Label": "Dispatch", "Value": "$.Attributes.s1_dispatch_id"}
+                   ],
+                   "Sections": [
+                     {"_id": "wrap", "Type": "FormSection", "Heading": "Service record",
+                      "Items": [{"LayoutConfiguration": {"Grid": [{"colspan": {"default": "12"}}]},
+                        "Items": [
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Disposition", "Name": "disposition", "DefaultValue": "Roadside, Tow Dispatched"},
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Dispatch details", "Name": "dispatch", "DefaultValue": "$.Attributes.s1_dispatch_message"},
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Summary", "Name": "summary", "DefaultValue": "$.Attributes.s1_summary"}
+                        ]}]}
+                   ],
+                   "Next": {"Label": "Submit"}
+                 }},
+               "Transitions": {"NextAction": "writeback",
+                 "Errors": [{"NextAction": "writeback", "ErrorType": "NoMatchingCondition"},
+                            {"NextAction": "end", "ErrorType": "NoMatchingError"},
+                            {"NextAction": "end", "ErrorType": "TimeLimitExceeded"}]}},
+              {"Identifier": "writeback", "Type": "InvokeLambdaFunction",
+               "Parameters": {"LambdaFunctionARN": "${ApiFunction.Arn}", "InvocationTimeLimitSeconds": "8",
+                 "LambdaInvocationAttributes": {"op": "writeback", "member_id": "$.Attributes.s1_member_id",
+                   "dispatch_id": "$.Attributes.s1_dispatch_id",
+                   "disposition": "$.Views.ViewResultData.FormData.disposition",
+                   "summary": "$.Views.ViewResultData.FormData.summary"},
+                 "ResponseValidation": {"ResponseType": "STRING_MAP"}},
+               "Transitions": {"NextAction": "saved", "Errors": [{"NextAction": "end", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "saved", "Type": "ShowView",
+               "Parameters": {"ViewResource": {"Id": "${ConfirmationView}"}, "InvocationTimeLimitSeconds": "600",
+                 "ViewData": {"Graphic": {"Include": true}, "Heading": "$.External.message",
+                   "SubHeading": "The case is closed in ServiceNow. You can end the contact.",
+                   "Next": {"Label": "Done"}}},
+               "Transitions": {"NextAction": "end",
+                 "Errors": [{"NextAction": "end", "ErrorType": "NoMatchingCondition"},
+                            {"NextAction": "end", "ErrorType": "NoMatchingError"},
+                            {"NextAction": "end", "ErrorType": "TimeLimitExceeded"}]}},
+              {"Identifier": "end", "Type": "EndFlowExecution", "Parameters": {}, "Transitions": {}}
+            ]
+          }
+        - FormView: !Sub "arn:aws:connect:${AWS::Region}:aws:view/form:1"
+          ConfirmationView: !Sub "arn:aws:connect:${AWS::Region}:aws:view/confirmation:1"
+
   # ---------- Chat flow: ACXD roadside intake -> Roadside queue ----------
   ChatFlow:
     Type: AWS::Connect::ContactFlow
@@ -280,7 +415,10 @@ Resources:
             "StartAction": "log",
             "Actions": [
               {"Identifier": "log", "Type": "UpdateFlowLoggingBehavior",
-               "Parameters": {"FlowLoggingBehavior": "Enabled"}, "Transitions": {"NextAction": "agent"}},
+               "Parameters": {"FlowLoggingBehavior": "Enabled"}, "Transitions": {"NextAction": "guide"}},
+              {"Identifier": "guide", "Type": "UpdateContactEventHooks",
+               "Parameters": {"EventHooks": {"DefaultAgentUI": "${GuideFlow.ContactFlowArn}"}},
+               "Transitions": {"NextAction": "agent", "Errors": [{"NextAction": "agent", "ErrorType": "NoMatchingError"}]}},
               {"Identifier": "agent", "Type": "ConnectParticipantWithAgenticCX",
                "Parameters": {"AgentConfiguration": {"WorkspaceId": "${AcxdWorkspaceId}", "ApplicationId": "${AcxdApplicationId}",
                  "Alias": "${AcxdAlias}", "ContextVariables": {"contact_id": "$.ContactId", "channel": "CHAT"}}},
@@ -346,6 +484,8 @@ Outputs:
     Value: !GetAtt RoadsideQueue.QueueArn
   RoadsideRoutingProfileArn:
     Value: !GetAtt RoadsideRoutingProfile.RoutingProfileArn
+  GuideFlowArn:
+    Value: !GetAtt GuideFlow.ContactFlowArn
   ChatFlowArn:
     Condition: HasAcxd
     Value: !GetAtt ChatFlow.ContactFlowArn
