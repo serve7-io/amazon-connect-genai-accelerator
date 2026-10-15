@@ -2,6 +2,8 @@
 
   connect-info      read-only summary of the Connect instance (queues, routing profiles, users, storage,
                     chat/attachment settings, flows, approved origins). Nothing is changed.
+  s5-snapshot       READ-ONLY: ccg-s5 stack parameters/status and the live content of ccg-s5-main and
+                    ccg-s5-secure-payment (last modified time, block count, keypad settings, full JSON). Changes nothing.
   add-persona       upsert ONLY the Scenario 1 persona (Sarah Mitchell, M-20481537) from demos/ccg-s5/data/synthetic.json
                     into the shared CRM table ccg-s5-members. No other row, flow or stack is touched.
 """
@@ -74,6 +76,54 @@ def connect_info(table, scan):
         print("integrations:", type(e).__name__)
 
 
+def s5_snapshot(table, scan):
+    cf = boto3.client("cloudformation", region_name=REGION)
+    st = cf.describe_stacks(StackName="ccg-s5")["Stacks"][0]
+    print(f"stack ccg-s5: {st['StackStatus']} last updated {st.get('LastUpdatedTime', st['CreationTime'])}")
+    for p in st.get("Parameters", []):
+        if p["ParameterKey"] not in ("EncryptionCertificate",):
+            print(f"  param {p['ParameterKey']} = {p.get('ParameterValue', '')}")
+    c = boto3.client("connect", region_name=REGION)
+    flows = {f["Name"]: f for f in _pages(c.list_contact_flows, "ContactFlowSummaryList", InstanceId=INSTANCE)}
+    full = {}
+    for name in ("ccg-s5-main", "ccg-s5-secure-payment"):
+        f = flows.get(name)
+        if not f:
+            print(f"\n{name}: not found")
+            continue
+        d = c.describe_contact_flow(InstanceId=INSTANCE, ContactFlowId=f["Id"])["ContactFlow"]
+        content = json.loads(d["Content"])
+        acts = content.get("Actions", [])
+        print(f"\n{name} ({f['Id']}): state={d.get('State')} status={d.get('Status')} "
+              f"last_modified={d.get('LastModifiedTime')} blocks={len(acts)}")
+        for a in acts:
+            p = a.get("Parameters", {})
+            line = f"  - {a.get('Identifier', '')[:40]:<40} {a['Type']}"
+            if a["Type"] == "GetParticipantInput":
+                keep = {k: v for k, v in p.items() if k not in ("InputEncryption",)}
+                line += " " + json.dumps(keep)
+            elif a["Type"] == "ConnectParticipantWithAgenticCX":
+                line += " " + json.dumps(p)
+            elif a["Type"] == "Compare":
+                line += " " + json.dumps(p) + " -> " + json.dumps(a.get("Transitions", {}).get("Conditions", []))
+            elif a["Type"] == "MessageParticipant":
+                line += " " + json.dumps(p.get("Text") or p.get("SSML") or "")[:160]
+            print(line)
+        try:
+            vers = c.list_contact_flow_versions(InstanceId=INSTANCE, ContactFlowId=f["Id"]).get("ContactFlowVersionSummaryList", [])
+            for v in vers:
+                print(f"  version {v.get('Version')}: {v.get('VersionDescription', '')}")
+        except Exception as e:  # noqa: BLE001
+            print(f"  versions: {type(e).__name__}")
+        if name == "ccg-s5-secure-payment":
+            for a in acts:
+                if a["Type"] == "GetParticipantInput":
+                    a["Parameters"].get("InputEncryption", {}).pop("Key", None)  # long public cert, not needed here
+        full[name] = content
+    print("\n===== FULL FLOW JSON (for committing to the repo) =====")
+    print(json.dumps(full, separators=(",", ":")))
+
+
 PERSONAS = ("M-20481537",)
 
 
@@ -89,4 +139,4 @@ def add_persona(table, scan):
             print(f"upserted {m['member_id']} {m['name']} ({m.get('tier')}, {m.get('vehicle')})")
 
 
-COMMANDS = {"connect-info": connect_info, "add-persona": add_persona}
+COMMANDS = {"connect-info": connect_info, "add-persona": add_persona, "s5-snapshot": s5_snapshot}
