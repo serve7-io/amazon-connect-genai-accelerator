@@ -1,13 +1,15 @@
 {
   "name": "ccg-s1",
-  "title": "CAA Scenario 1 - persistent cross-channel roadside assistance",
+  "title": "CAA Scenario 1 - persistent cross-channel roadside assistance (Vanja's build brief)",
   "stack": "demo-ccg-s1",
   "region": "ca-central-1",
   "lambda_dir": "lambdas/api",
-  "seed": "data/seed.json",
-  "acxd_secret": "ccg_s5_api_key",
+  "seed": "lambdas/api/seed.json",
+  "acxd_secret": "ccg_s1_api_key",
   "status_tables": [
-    "CasesTable"
+    "MembersTable",
+    "DispatchesTable",
+    "ServiceRecordsTable"
   ],
   "instance_id": "78261fe2-310c-4f82-8437-4239487463ac",
   "tags": {
@@ -16,6 +18,6 @@
     "serve7:data-classification": "synthetic"
   },
   "smoke": {
-    "op": "get_coverage"
+    "op": "lookupmember"
   }
 }

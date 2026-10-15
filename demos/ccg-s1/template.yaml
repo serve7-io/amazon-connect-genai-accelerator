@@ -1,9 +1,11 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  Serve7 - CAA RFP Scenario 1 (persistent cross-channel roadside assistance), synthetic data only.
-  Roadside API + Connect hand-off Lambda + member portal page, Roadside queue and routing profile, chat attachments,
-  and the chat flow (ACXD roadside agent -> escalation -> Roadside queue with the AI intake as contact attributes).
-  Deployed by demos/_kit/deploy.sh (demo: deploy ccg-s1).
+  Serve7 - CAA RFP Scenario 1 (persistent cross-channel roadside assistance), synthetic data only. Built to Vanja's
+  "CCG Scenario 1 build brief" (15 Oct 2026). Tables ccg-s1-*, Lambda ccg-s1-api (Function URL + Connect invoke),
+  Roadside queue with proficiency routing, routing profile with cross-channel concurrency, and the chat flow
+  ccg-s1-chat-main (created once the ACXD app exists). Does not touch the ccg-s5 stack.
+  Deployed by demos/_kit/deploy.sh (issue "demo: deploy ccg-s1"); the CI role only creates IAM roles named demo-*,
+  so the stack is demo-ccg-s1 and its Lambda role gets an auto-generated demo-ccg-s1-* name.
 
 Parameters:
   CodeBucket:
@@ -12,23 +14,41 @@ Parameters:
     Type: String
   ApiKeySecretArn:
     Type: String
+    Description: Secrets Manager secret with the x-api-key (shared with Scenario 5; read by CloudFormation, never printed)
   ConnectInstanceArn:
     Type: String
     Default: arn:aws:connect:ca-central-1:480315222980:instance/78261fe2-310c-4f82-8437-4239487463ac
-  MembersTableName:
+  SmsEnabled:
     Type: String
-    Default: ccg-s5-members
-    Description: Shared CRM member table (Scenario 5 stack)
+    AllowedValues: ["true", "false"]
+    Default: "false"
+    Description: Phase B/C guide flow sends the tow SMS with the Send message block only when true (needs an SMS number)
   AcxdWorkspaceId:
     Type: String
     Default: f2e8e16b-df1e-4177-a3d8-42b833becf81
   AcxdApplicationId:
     Type: String
     Default: ""
-    Description: ACXD app ccg-roadside (empty = chat flow not created yet)
-  AcxdDeploymentKey:
+    Description: ACXD app ccg-roadside-intake (empty = chat flow not created yet)
+  AcxdAlias:
     Type: String
     Default: ""
+    Description: Production deployment key of ccg-roadside-intake
+  AcxdReturnPath:
+    Type: String
+    Default: ""
+    Description: >-
+      JSONPath prefix the Connect flow uses for values returned by the Agentic CX block (the "Agentic CX" namespace in
+      Set contact attributes), without the trailing dot. Not documented in the flow language reference; read it from a
+      console-built Set contact attributes block once, then set it here.
+  RoadsideOverflowSeconds:
+    Type: Number
+    Default: 90
+    Description: How long a chat waits for an agent with the roadside_dispatch proficiency before any Roadside agent can take it
+  SarahDemoPhone:
+    Type: String
+    Default: ""
+    Description: E.164 demo mobile for the outbound quick connect (empty = no quick connect yet)
   WidgetId:
     Type: String
     Default: ""
@@ -40,18 +60,64 @@ Parameters:
     Default: ""
 
 Conditions:
-  HasAcxd: !And [!Not [!Equals [!Ref AcxdApplicationId, ""]], !Not [!Equals [!Ref AcxdDeploymentKey, ""]]]
+  HasAcxd: !And
+    - !Not [!Equals [!Ref AcxdApplicationId, ""]]
+    - !Not [!Equals [!Ref AcxdAlias, ""]]
+    - !Not [!Equals [!Ref AcxdReturnPath, ""]]
+  HasSarahPhone: !Not [!Equals [!Ref SarahDemoPhone, ""]]
 
 Resources:
-  CasesTable:
+  # ---------- Data (names follow the ccg-s5 pattern) ----------
+  MembersTable:
     Type: AWS::DynamoDB::Table
     Properties:
+      TableName: ccg-s1-members
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: member_id, AttributeType: S}
+        - {AttributeName: phone_key, AttributeType: S}
+      KeySchema: [{AttributeName: member_id, KeyType: HASH}]
+      GlobalSecondaryIndexes:
+        - IndexName: phone-index
+          KeySchema: [{AttributeName: phone_key, KeyType: HASH}]
+          Projection: {ProjectionType: ALL}
+      SSESpecification: {SSEEnabled: true}
+  ServiceHistoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ccg-s1-service-history
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: member_id, AttributeType: S}
+        - {AttributeName: event_date, AttributeType: S}
+      KeySchema: [{AttributeName: member_id, KeyType: HASH}, {AttributeName: event_date, KeyType: RANGE}]
+      SSESpecification: {SSEEnabled: true}
+  ProvidersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ccg-s1-providers
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: provider_id, AttributeType: S}]
+      KeySchema: [{AttributeName: provider_id, KeyType: HASH}]
+      SSESpecification: {SSEEnabled: true}
+  DispatchesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ccg-s1-dispatches
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: dispatch_id, AttributeType: S}]
+      KeySchema: [{AttributeName: dispatch_id, KeyType: HASH}]
+      SSESpecification: {SSEEnabled: true}
+  ServiceRecordsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ccg-s1-service-records
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions: [{AttributeName: contact_id, AttributeType: S}]
       KeySchema: [{AttributeName: contact_id, KeyType: HASH}]
-      TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
       SSESpecification: {SSEEnabled: true}
 
+  # ---------- API ----------
   ApiRole:
     Type: AWS::IAM::Role
     Properties:
@@ -65,15 +131,20 @@ Resources:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:Query]
-                Resource: !GetAtt CasesTable.Arn
-              - Effect: Allow
-                Action: [dynamodb:GetItem]
-                Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MembersTableName}
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:DeleteItem, dynamodb:Query, dynamodb:Scan]
+                Resource:
+                  - !GetAtt MembersTable.Arn
+                  - !Sub "${MembersTable.Arn}/index/*"
+                  - !GetAtt ServiceHistoryTable.Arn
+                  - !GetAtt ProvidersTable.Arn
+                  - !GetAtt DispatchesTable.Arn
+                  - !GetAtt ServiceRecordsTable.Arn
 
   ApiFunction:
     Type: AWS::Lambda::Function
     Properties:
+      FunctionName: ccg-s1-api
+      Description: CAA Scenario 1 roadside API (ACXD data requests, Connect flows and guides, member portal page)
       Runtime: python3.13
       Handler: handler.handler
       Timeout: 8
@@ -82,9 +153,13 @@ Resources:
       Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
       Environment:
         Variables:
-          CASES_TABLE: !Ref CasesTable
-          MEMBERS_TABLE: !Ref MembersTableName
+          MEMBERS_TABLE: !Ref MembersTable
+          HISTORY_TABLE: !Ref ServiceHistoryTable
+          PROVIDERS_TABLE: !Ref ProvidersTable
+          DISPATCHES_TABLE: !Ref DispatchesTable
+          RECORDS_TABLE: !Ref ServiceRecordsTable
           API_KEY: !Sub "{{resolve:secretsmanager:${ApiKeySecretArn}}}"
+          SMS_ENABLED: !Ref SmsEnabled
           WIDGET_ID: !Ref WidgetId
           WIDGET_SNIPPET_ID: !Ref WidgetSnippetId
           WIDGET_SRC: !Ref WidgetSrc
@@ -92,7 +167,7 @@ Resources:
     Type: AWS::Lambda::Url
     Properties:
       TargetFunctionArn: !GetAtt ApiFunction.Arn
-      AuthType: NONE   # data operations check x-api-key; GET / serves the public demo page
+      AuthType: NONE   # operations check x-api-key; GET / serves the public demo page
   ApiUrlPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -122,10 +197,9 @@ Resources:
       IntegrationType: LAMBDA_FUNCTION
       IntegrationArn: !GetAtt ApiFunction.Arn
 
-  # ---------- Connect: Roadside queue and routing ----------
-  # Chat attachments are enabled once in the Connect console (Data storage > Attachments): Connect then updates its
-  # service-linked role, which the CI role is deliberately not allowed to do.
-
+  # ---------- Connect: Roadside queue, proficiency and routing ----------
+  # Console steps (see README): chat attachments, user james.rivera with proficiency roadside_dispatch, Contact Lens
+  # generative summaries, the S1 step-by-step view.
   RoadsideHours:
     Type: AWS::Connect::HoursOfOperation
     Properties:
@@ -142,41 +216,63 @@ Resources:
         - {Day: SATURDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
         - {Day: SUNDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
 
+  RoadsideDispatchAttribute:
+    Type: AWS::Connect::PredefinedAttribute
+    Properties:
+      InstanceArn: !Ref ConnectInstanceArn
+      Name: roadside_dispatch
+      Values:
+        StringList: [certified]
+
+  SarahQuickConnect:
+    Type: AWS::Connect::QuickConnect
+    Condition: HasSarahPhone
+    Properties:
+      InstanceArn: !Ref ConnectInstanceArn
+      Name: Sarah Mitchell (demo mobile)
+      Description: CAA Scenario 1 - outbound call from the chat to the member's demo mobile
+      QuickConnectConfig:
+        QuickConnectType: PHONE_NUMBER
+        PhoneConfig: {PhoneNumber: !Ref SarahDemoPhone}
+
   RoadsideQueue:
     Type: AWS::Connect::Queue
     Properties:
       InstanceArn: !Ref ConnectInstanceArn
-      Name: Roadside Assistance
-      Description: CAA Scenario 1 - roadside dispatch agents (demo)
+      Name: Roadside
+      Description: >-
+        CAA Scenario 1 - roadside dispatch. Chats first wait for an agent with roadside_dispatch (certified, level 4+)
+        for RoadsideOverflowSeconds, then any agent with this queue in their routing profile.
       HoursOfOperationArn: !GetAtt RoadsideHours.HoursOfOperationArn
+      QuickConnectArns: !If [HasSarahPhone, [!GetAtt SarahQuickConnect.QuickConnectArn], !Ref AWS::NoValue]
 
   RoadsideRoutingProfile:
     Type: AWS::Connect::RoutingProfile
     Properties:
       InstanceArn: !Ref ConnectInstanceArn
       Name: Roadside Agents
-      Description: CAA Scenario 1 - chat and voice from the Roadside Assistance queue (demo agent James Rivera)
+      Description: CAA Scenario 1 - chat and voice from the Roadside queue, cross-channel (James Rivera can call while on a chat)
       DefaultOutboundQueueArn: !GetAtt RoadsideQueue.QueueArn
       MediaConcurrencies:
-        - {Channel: CHAT, Concurrency: 2}
-        - {Channel: VOICE, Concurrency: 1}
+        - {Channel: CHAT, Concurrency: 2, CrossChannelBehavior: {BehaviorType: ROUTE_ANY_CHANNEL}}
+        - {Channel: VOICE, Concurrency: 1, CrossChannelBehavior: {BehaviorType: ROUTE_ANY_CHANNEL}}
       QueueConfigs:
         - {Delay: 0, Priority: 1, QueueReference: {Channel: CHAT, QueueArn: !GetAtt RoadsideQueue.QueueArn}}
         - {Delay: 0, Priority: 1, QueueReference: {Channel: VOICE, QueueArn: !GetAtt RoadsideQueue.QueueArn}}
 
-  # ---------- Chat flow: ACXD roadside agent -> Roadside queue ----------
+  # ---------- Chat flow: ACXD roadside intake -> Roadside queue ----------
   ChatFlow:
     Type: AWS::Connect::ContactFlow
     Condition: HasAcxd
-    DependsOn: ConnectLambdaAssociation
+    DependsOn: [ConnectLambdaAssociation, RoadsideDispatchAttribute]
     Properties:
       InstanceArn: !Ref ConnectInstanceArn
-      Name: ccg-s1-chat
+      Name: ccg-s1-chat-main
       Type: CONTACT_FLOW
       Description: >-
-        CAA Scenario 1 web chat. ACXD roadside agent (intake, verification, location, photo, tow). On escalation the
-        AI intake is copied into contact attributes and the chat goes to the Roadside Assistance queue (same contact,
-        full transcript).
+        CAA Scenario 1 web chat. ACXD app ccg-roadside-intake does the intake; on escalation its context variables
+        become s1_* contact attributes and the chat goes to the Roadside queue (same contact, full transcript).
+        Errors also go to Roadside.
       Content: !Sub
         - |
           {
@@ -187,24 +283,24 @@ Resources:
                "Parameters": {"FlowLoggingBehavior": "Enabled"}, "Transitions": {"NextAction": "agent"}},
               {"Identifier": "agent", "Type": "ConnectParticipantWithAgenticCX",
                "Parameters": {"AgentConfiguration": {"WorkspaceId": "${AcxdWorkspaceId}", "ApplicationId": "${AcxdApplicationId}",
-                 "Alias": "${AcxdDeploymentKey}", "ContextVariables": {"contact_id": "$.InitialContactId"}}},
-               "Transitions": {"NextAction": "error-msg",
+                 "Alias": "${AcxdAlias}", "ContextVariables": {"contact_id": "$.ContactId", "channel": "CHAT"}}},
+               "Transitions": {"NextAction": "bye-msg",
                  "Errors": [{"NextAction": "error-msg", "ErrorType": "NoMatchingError"},
-                            {"NextAction": "bye", "ErrorType": "NoMatchingCondition"}],
-                 "Conditions": [{"NextAction": "load-case", "Condition": {"Operator": "Equals", "Operands": ["Escalation"]}}]}},
-              {"Identifier": "load-case", "Type": "InvokeLambdaFunction",
-               "Parameters": {"LambdaFunctionARN": "${ApiFunction.Arn}", "InvocationTimeLimitSeconds": "8",
-                 "ResponseValidation": {"ResponseType": "STRING_MAP"}},
-               "Transitions": {"NextAction": "attrs", "Errors": [{"NextAction": "queue", "ErrorType": "NoMatchingError"}]}},
+                            {"NextAction": "bye-msg", "ErrorType": "NoMatchingCondition"},
+                            {"NextAction": "idle-msg", "ErrorType": "InputTimeLimitExceeded"}],
+                 "Conditions": [{"NextAction": "attrs", "Condition": {"Operator": "Equals", "Operands": ["Escalation"]}}]}},
               {"Identifier": "attrs", "Type": "UpdateContactAttributes",
                "Parameters": {"TargetContact": "Current", "Attributes": {
-                 "s1_case_id": "$.External.s1_case_id", "s1_member_id": "$.External.s1_member_id",
-                 "s1_member_name": "$.External.s1_member_name", "s1_tier": "$.External.s1_tier",
-                 "s1_vehicle": "$.External.s1_vehicle", "s1_verified": "$.External.s1_verified",
-                 "s1_location": "$.External.s1_location", "s1_service": "$.External.s1_service",
-                 "s1_safe": "$.External.s1_safe", "s1_spare": "$.External.s1_spare", "s1_photo": "$.External.s1_photo",
-                 "s1_priority": "$.External.s1_priority", "s1_summary": "$.External.s1_summary",
-                 "s1_channel_path": "web chat (AI) -> live agent"}},
+                 "s1_auth": "${P}.authStatus", "s1_tier": "${P}.tier", "s1_vehicle": "${P}.vehicle",
+                 "s1_location": "${P}.location", "s1_safety": "${P}.safety", "s1_spare": "${P}.spare",
+                 "s1_service": "${P}.serviceType", "s1_member_id": "${P}.memberId", "s1_summary": "${P}.transferSummary",
+                 "s1_channel_path": "web chat (AI) to live agent"}},
+               "Transitions": {"NextAction": "routing", "Errors": [{"NextAction": "routing", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "routing", "Type": "UpdateContactRoutingBehavior",
+               "Parameters": {"RoutingCriteria": {"Steps": [{
+                 "Expression": {"AttributeCondition": {"Name": "roadside_dispatch", "Value": "certified",
+                   "ProficiencyLevel": 4, "ComparisonOperator": "NumberGreaterOrEqualTo"}},
+                 "Expiry": {"DurationInSeconds": ${RoadsideOverflowSeconds}}}]}},
                "Transitions": {"NextAction": "queue", "Errors": [{"NextAction": "queue", "ErrorType": "NoMatchingError"}]}},
               {"Identifier": "queue", "Type": "UpdateContactTargetQueue",
                "Parameters": {"QueueId": "${RoadsideQueue.QueueArn}"},
@@ -212,24 +308,40 @@ Resources:
               {"Identifier": "transfer", "Type": "TransferContactToQueue", "Parameters": {},
                "Transitions": {"NextAction": "busy", "Errors": [{"NextAction": "busy", "ErrorType": "QueueAtCapacity"},
                                                                 {"NextAction": "busy", "ErrorType": "NoMatchingError"}]}},
-              {"Identifier": "busy", "Type": "MessageParticipant",
-               "Parameters": {"Text": "All of our roadside agents are busy right now. Your request is saved and we will contact you shortly."},
-               "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
               {"Identifier": "error-msg", "Type": "MessageParticipant",
-               "Parameters": {"Text": "Sorry, something went wrong on our side. Please try again in a moment, or call us."},
+               "Parameters": {"Text": "Sorry, something went wrong on our side. I'm connecting you with a roadside agent now."},
+               "Transitions": {"NextAction": "routing", "Errors": [{"NextAction": "routing", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "idle-msg", "Type": "MessageParticipant",
+               "Parameters": {"Text": "I haven't heard from you, so I'll close this chat for now. If you still need help, start a new chat or call us. Stay safe."},
+               "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "busy", "Type": "MessageParticipant",
+               "Parameters": {"Text": "All of our roadside agents are busy right now. Please call us and we'll help you right away."},
+               "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "bye-msg", "Type": "MessageParticipant",
+               "Parameters": {"Text": "Thanks for contacting CAA. Stay safe."},
                "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
               {"Identifier": "bye", "Type": "DisconnectParticipant", "Parameters": {}, "Transitions": {}}
             ]
           }
-        - {}
+        - P: !Ref AcxdReturnPath
 
 Outputs:
   AcxdApiUrl:
     Value: !GetAtt ApiFunctionUrl.FunctionUrl
   PortalUrl:
     Value: !GetAtt ApiFunctionUrl.FunctionUrl
-  CasesTable:
-    Value: !Ref CasesTable
+  ApiFunctionArn:
+    Value: !GetAtt ApiFunction.Arn
+  MembersTable:
+    Value: !Ref MembersTable
+  ServiceHistoryTable:
+    Value: !Ref ServiceHistoryTable
+  ProvidersTable:
+    Value: !Ref ProvidersTable
+  DispatchesTable:
+    Value: !Ref DispatchesTable
+  ServiceRecordsTable:
+    Value: !Ref ServiceRecordsTable
   RoadsideQueueArn:
     Value: !GetAtt RoadsideQueue.QueueArn
   RoadsideRoutingProfileArn:

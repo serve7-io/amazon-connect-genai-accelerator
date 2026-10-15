@@ -1,0 +1,99 @@
+{
+  "_note": "CAA Scenario 1 demo data. Synthetic only: names, numbers and providers are invented for the demo. Rows marked demo_value are not CCG facts; Sarah's profile follows the demo script. Phone numbers use the fictional 555-01xx range.",
+  "tables": {
+    "MembersTable": [
+      {
+        "member_id": "M-20481537",
+        "first_name": "Sarah",
+        "last_name": "Mitchell",
+        "tier": "Plus",
+        "member_since": "2019",
+        "phone": "+16135550152",
+        "phone_key": "6135550152",
+        "postal_code": "K7L 3N6",
+        "dob": "1986-04-22",
+        "city": "Kingston, ON",
+        "vehicle": {"year": 2023, "make": "Honda", "model": "CR-V", "plate": "ABCD 123", "province": "ON"},
+        "open_cases": 0,
+        "demo_value_fields": ["phone", "postal_code", "dob"]
+      },
+      {
+        "member_id": "M-31570264",
+        "first_name": "Daniel",
+        "last_name": "Fraser",
+        "tier": "Basic",
+        "member_since": "2023",
+        "phone": "+13435550168",
+        "phone_key": "3435550168",
+        "postal_code": "K7M 2B4",
+        "dob": "1979-08-15",
+        "city": "Kingston, ON",
+        "vehicle": {"year": 2018, "make": "Toyota", "model": "Corolla", "plate": "BXRT 417", "province": "ON"},
+        "open_cases": 0,
+        "demo_value": true
+      },
+      {
+        "member_id": "M-48263915",
+        "first_name": "Priya",
+        "last_name": "Raman",
+        "tier": "Premier",
+        "member_since": "2012",
+        "phone": "+16135550174",
+        "phone_key": "6135550174",
+        "postal_code": "K1N 6N5",
+        "dob": "1971-01-30",
+        "city": "Ottawa, ON",
+        "vehicle": {"year": 2024, "make": "Hyundai", "model": "Ioniq 5", "plate": "CKPL 902", "province": "ON"},
+        "open_cases": 1,
+        "demo_value": true
+      }
+    ],
+    "ServiceHistoryTable": [
+      {"member_id": "M-20481537", "event_date": "2025-03", "service": "battery boost"},
+      {"member_id": "M-48263915", "event_date": "2024-11", "service": "tow", "demo_value": true},
+      {"member_id": "M-48263915", "event_date": "2026-01", "service": "lockout", "demo_value": true}
+    ],
+    "ProvidersTable": [
+      {
+        "provider_id": "P-KAS",
+        "name": "Kingston Auto Services",
+        "driver": "Mike T.",
+        "region": "Kingston",
+        "certified": true,
+        "rank": 1,
+        "eta_min_low": 25,
+        "eta_min_high": 30,
+        "destination": "certified repair shop, Princess Street, Kingston",
+        "shop_hours_today": "open until 5 PM today"
+      },
+      {
+        "provider_id": "P-FRC",
+        "name": "Frontenac Roadside Co. (demo)",
+        "driver": "Alex R.",
+        "region": "Kingston",
+        "certified": true,
+        "rank": 2,
+        "eta_min_low": 40,
+        "eta_min_high": 50,
+        "destination": "certified repair shop, Gardiners Road, Kingston",
+        "shop_hours_today": "open until 4 PM today",
+        "demo_value": true
+      },
+      {
+        "provider_id": "P-OTW",
+        "name": "Capital Tow and Recovery (demo)",
+        "driver": "Sam L.",
+        "region": "Ottawa",
+        "certified": true,
+        "rank": 1,
+        "eta_min_low": 30,
+        "eta_min_high": 40,
+        "destination": "certified repair shop, Bank Street, Ottawa",
+        "shop_hours_today": "open until 6 PM today",
+        "demo_value": true
+      }
+    ],
+    "DispatchesTable": [],
+    "ServiceRecordsTable": []
+  }
+}
