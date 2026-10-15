@@ -26,7 +26,7 @@
       }
     }
   },
-  "description": "Shared CRM lookup: membership number or the phone number on the account -> member (not yet verified).",
+  "description": "Finds the member by membership number (not a verification).",
   "sensitive": false,
   "streamStateModifications": false,
   "requestSchema": {
@@ -36,13 +36,7 @@
         "type": "string",
         "isSensitive": false,
         "title": "",
-        "description": "Membership number as said/typed (e.g. M-20481537). Leave empty if the caller gives a phone number."
-      },
-      "phone": {
-        "type": "string",
-        "isSensitive": false,
-        "title": "",
-        "description": "Phone number on the account, if the caller gives that instead of the membership number"
+        "description": "Membership number as the caller says it, e.g. M-60425183"
       }
     },
     "isSensitive": false,
@@ -75,42 +69,6 @@
         "isSensitive": false,
         "title": "",
         "description": "Basic, Plus or Premier"
-      },
-      "vehicle": {
-        "type": "string",
-        "isSensitive": false,
-        "title": "",
-        "description": "Vehicle on file, e.g. 2023 Honda CR-V"
-      },
-      "vehicle_plate": {
-        "type": "string",
-        "isSensitive": false,
-        "title": "",
-        "description": ""
-      },
-      "member_since": {
-        "type": "string",
-        "isSensitive": false,
-        "title": "",
-        "description": ""
-      },
-      "service_history": {
-        "type": "array",
-        "isSensitive": false,
-        "title": "",
-        "description": "Previous roadside services (date, service)",
-        "items": {
-          "type": "object",
-          "isSensitive": false,
-          "title": "",
-          "description": ""
-        }
-      },
-      "open_cases": {
-        "type": "number",
-        "isSensitive": false,
-        "title": "",
-        "description": ""
       }
     },
     "isSensitive": false,
