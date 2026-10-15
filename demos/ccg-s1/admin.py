@@ -2,7 +2,7 @@
 
   connect-info      read-only summary of the Connect instance (queues, routing profiles, users, storage,
                     chat/attachment settings, flows, approved origins). Nothing is changed.
-  s5-snapshot       READ-ONLY: ccg-s5 stack parameters/status and the live content of ccg-s5-main and
+  flow-snapshot     READ-ONLY: ccg-s5 stack parameters/status and the live content of ccg-s5-main and
                     ccg-s5-secure-payment (last modified time, block count, keypad settings, full JSON). Changes nothing.
   add-persona       upsert ONLY the Scenario 1 persona (Sarah Mitchell, M-20481537) from demos/ccg-s5/data/synthetic.json
                     into the shared CRM table ccg-s5-members. No other row, flow or stack is touched.
@@ -139,4 +139,4 @@ def add_persona(table, scan):
             print(f"upserted {m['member_id']} {m['name']} ({m.get('tier')}, {m.get('vehicle')})")
 
 
-COMMANDS = {"connect-info": connect_info, "add-persona": add_persona, "s5-snapshot": s5_snapshot}
+COMMANDS = {"connect-info": connect_info, "add-persona": add_persona, "flow-snapshot": s5_snapshot}
