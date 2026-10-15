@@ -112,6 +112,16 @@ def test_coverage_plus_tow_matches_script(api):
     assert call(api, "coverage", {"member_id": "M-31570264"})[1]["demo_value"] is True
 
 
+def test_coverage_echoes_intake_and_builds_hand_off_summary(api):
+    out = call(api, "coverage", {"member_id": SARAH, "service": "tow", "location": "Hwy 401 EB near Joyceville Rd",
+                                 "safety": "safe, off the road", "spare": "no spare"})[1]
+    assert (out["location"], out["safety"], out["spare"]) == ("Hwy 401 EB near Joyceville Rd", "safe, off the road", "no spare")
+    assert out["summary"] == ("Sarah Mitchell, Plus member M-20481537. Vehicle: 2023 Honda CR-V. "
+                              "Location: Hwy 401 EB near Joyceville Rd. Safety: safe, off the road. Spare tire: no spare. "
+                              "Needs towing, 200 km covered at no charge.")
+    assert call(api, "verifyservice", {"member_id": SARAH, "vehicle_confirmed": "yes"})[1]["auth_status"] == "Verified"
+
+
 def test_dispatch_writes_record_and_returns_script_values(api):
     out = call(api, "dispatch", {"member_id": SARAH, "location": "Hwy 401 EB near Joyceville Rd, Kingston",
                                  "service": "tow", "destination": "nearest_certified"})[1]

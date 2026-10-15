@@ -221,10 +221,10 @@ def verifyservice(b):
               "phone": lambda: _phone_key(m.get("phone")) == _phone_key(b.get("phone")) != "",
               "dob": lambda: m.get("dob") == _dob(b.get("dob"))}
     if not all(checks[f]() for f in AUTH_LEVELS[level]):
-        return {"verified": False, "error": "not_verified", "auth_level": level,
+        return {"verified": False, "error": "not_verified", "auth_level": level, "auth_status": "Not verified",
                 "message": "That doesn't match what we have on file. Could you check the details and try again?"}
-    return {"verified": True, "auth_level": level, "method": AUTH_METHOD[level], "member_id": m["member_id"],
-            "message": f"Thank you, {m['first_name']}. You're verified."}
+    return {"verified": True, "auth_level": level, "auth_status": "Verified", "method": AUTH_METHOD[level],
+            "member_id": m["member_id"], "message": f"Thank you, {m['first_name']}. You're verified."}
 
 
 def coverage(b):
@@ -236,12 +236,28 @@ def coverage(b):
         return {"covered": False, "error": "unknown_service", "valid_options": sorted(SERVICES),
                 "message": "Which service do you need: a tow, a tire change, a battery boost, a lockout or fuel delivery?"}
     tier = COVERAGE.get(m["tier"], COVERAGE["Basic"])
+    location = str(b.get("location") or "").strip()
+    safety = str(b.get("safety") or "").strip()
+    spare = str(b.get("spare") or "").strip()
     out = {"covered": True, "tier": m["tier"], "service": service, "tow_km_included": tier["tow_km"],
-           "cost_to_member": 0, "demo_value": tier["demo_value"]}
+           "cost_to_member": 0, "demo_value": tier["demo_value"], "location": location, "safety": safety, "spare": spare}
     if service == "tow":
         out["message"] = f"Your {m['tier']} membership covers up to {tier['tow_km']} km of towing at no charge."
     else:
         out["message"] = f"Your {m['tier']} membership covers {SERVICES[service]} at no charge."
+    # Hand-off summary for the live agent, built only from checked data and what the member said (no model text).
+    parts = [f"{m['first_name']} {m.get('last_name', '')}".strip() + f", {m['tier']} member {m['member_id']}."]
+    if m.get("vehicle"):
+        parts.append(f"Vehicle: {_vehicle_spoken(m)}.")
+    if location:
+        parts.append(f"Location: {location}.")
+    if safety:
+        parts.append(f"Safety: {safety}.")
+    if spare:
+        parts.append(f"Spare tire: {spare}.")
+    parts.append(f"Needs {SERVICES[service]}" + (f", {tier['tow_km']} km covered at no charge." if service == "tow" else
+                                                  ", covered at no charge."))
+    out["summary"] = " ".join(parts)
     return out
 
 

@@ -10,6 +10,7 @@
     "response": {
       "verified": true,
       "auth_level": "service",
+      "auth_status": "Verified",
       "method": "membership number + vehicle",
       "member_id": "M-20481537",
       "message": "Thank you, Sarah. You're verified."
@@ -25,6 +26,7 @@
       "verified": false,
       "error": "not_verified",
       "auth_level": "service",
+      "auth_status": "Not verified",
       "message": "That doesn't match what we have on file. Could you check the details and try again?"
     }
   }
