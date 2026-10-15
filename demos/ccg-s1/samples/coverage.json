@@ -4,7 +4,10 @@
   "success": {
     "request": {
       "member_id": "M-20481537",
-      "service": "tow"
+      "service": "tow",
+      "location": "Highway 401 eastbound near Joyceville Road, Kingston",
+      "safety": "safe, off the road",
+      "spare": "no spare"
     },
     "response": {
       "covered": true,
@@ -13,7 +16,11 @@
       "tow_km_included": 200,
       "cost_to_member": 0,
       "demo_value": false,
-      "message": "Your Plus membership covers up to 200 km of towing at no charge."
+      "location": "Highway 401 eastbound near Joyceville Road, Kingston",
+      "safety": "safe, off the road",
+      "spare": "no spare",
+      "message": "Your Plus membership covers up to 200 km of towing at no charge.",
+      "summary": "Sarah Mitchell, Plus member M-20481537. Vehicle: 2023 Honda CR-V. Location: Highway 401 eastbound near Joyceville Road, Kingston. Safety: safe, off the road. Spare tire: no spare. Needs towing, 200 km covered at no charge."
     }
   },
   "error": {
