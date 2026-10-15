@@ -4,8 +4,9 @@
                     chat/attachment settings, flows, approved origins). Nothing is changed.
   flow-snapshot     READ-ONLY: ccg-s5 stack parameters/status and the live content of ccg-s5-main and
                     ccg-s5-secure-payment (last modified time, block count, keypad settings, full JSON). Changes nothing.
-  add-persona       upsert ONLY the Scenario 1 persona (Sarah Mitchell, M-20481537) from demos/ccg-s5/data/synthetic.json
-                    into the shared CRM table ccg-s5-members. No other row, flow or stack is touched.
+                    Optional flow names: demo: flow-snapshot ccg-s1 <flow name> (names without spaces).
+  set-proficiency   after Milos creates james.rivera in the console: Roadside Agents routing profile and the
+                    roadside_dispatch proficiency (certified, level 5). Changes only that user.
 """
 import json
 
@@ -76,7 +77,7 @@ def connect_info(table, scan):
         print("integrations:", type(e).__name__)
 
 
-def s5_snapshot(table, scan):
+def s5_snapshot(table, scan, *names):
     cf = boto3.client("cloudformation", region_name=REGION)
     st = cf.describe_stacks(StackName="ccg-s5")["Stacks"][0]
     print(f"stack ccg-s5: {st['StackStatus']} last updated {st.get('LastUpdatedTime', st['CreationTime'])}")
@@ -86,7 +87,7 @@ def s5_snapshot(table, scan):
     c = boto3.client("connect", region_name=REGION)
     flows = {f["Name"]: f for f in _pages(c.list_contact_flows, "ContactFlowSummaryList", InstanceId=INSTANCE)}
     full = {}
-    for name in ("ccg-s5-main", "ccg-s5-secure-payment"):
+    for name in (names or ("ccg-s5-main", "ccg-s5-secure-payment")):
         f = flows.get(name)
         if not f:
             print(f"\n{name}: not found")
@@ -124,19 +125,23 @@ def s5_snapshot(table, scan):
     print(json.dumps(full, separators=(",", ":")))
 
 
-PERSONAS = ("M-20481537",)
+def set_proficiency(table, scan, username="james.rivera"):
+    """Give the demo agent the roadside_dispatch proficiency (certified, level 5) and the Roadside Agents routing
+    profile. The user itself is created by Milos in the console (he sets the password). Changes only this user."""
+    c = boto3.client("connect", region_name=REGION)
+    users = {u["Username"]: u for u in _pages(c.list_users, "UserSummaryList", InstanceId=INSTANCE)}
+    if username not in users:
+        raise SystemExit(f"user {username} not found: create it in the Connect console first")
+    uid = users[username]["Id"]
+    rps = {r["Name"]: r for r in _pages(c.list_routing_profiles, "RoutingProfileSummaryList", InstanceId=INSTANCE)}
+    c.update_user_routing_profile(InstanceId=INSTANCE, UserId=uid, RoutingProfileId=rps["Roadside Agents"]["Id"])
+    prof = [{"AttributeName": "roadside_dispatch", "AttributeValue": "certified", "Level": 5.0}]
+    have = c.list_user_proficiencies(InstanceId=INSTANCE, UserId=uid).get("UserProficiencyList", [])
+    if any(p["AttributeName"] == "roadside_dispatch" for p in have):
+        c.update_user_proficiencies(InstanceId=INSTANCE, UserId=uid, UserProficiencies=prof)
+    else:
+        c.associate_user_proficiencies(InstanceId=INSTANCE, UserId=uid, UserProficiencies=prof)
+    print(f"{username}: routing profile Roadside Agents, proficiency roadside_dispatch=certified level 5")
 
 
-def add_persona(table, scan):
-    from decimal import Decimal
-    from pathlib import Path
-    data = json.loads((Path(__file__).resolve().parents[1] / "ccg-s5" / "data" / "synthetic.json").read_text(),
-                      parse_float=Decimal)
-    t = boto3.resource("dynamodb", region_name=REGION).Table("ccg-s5-members")
-    for m in data["members"]:
-        if m["member_id"] in PERSONAS:
-            t.put_item(Item=m)
-            print(f"upserted {m['member_id']} {m['name']} ({m.get('tier')}, {m.get('vehicle')})")
-
-
-COMMANDS = {"connect-info": connect_info, "add-persona": add_persona, "flow-snapshot": s5_snapshot}
+COMMANDS = {"connect-info": connect_info, "flow-snapshot": s5_snapshot, "set-proficiency": set_proficiency}

@@ -1,50 +1,156 @@
 # CAA Scenario 1: persistent cross-channel roadside assistance (demo)
 
-Dan's script, Part 1: Sarah Mitchell, a Plus member (M-20481537, 2023 Honda CR-V), has a flat tire with no spare on Hwy 401 near Kingston. **Synthetic data only.**
+Built to Vanja's "CCG Scenario 1 build brief" (15 Oct 2026). Synthetic data only.
 
-## Phases
-- **A (this stack):**
-  - member-portal page with the Connect chat widget;
-  - ACXD roadside intake agent: safety check, shared CRM lookup by membership number or phone, service-level verification by vehicle, location, photo attachment, tow coverage;
-  - hand-off to the **Roadside Assistance** queue. The AI intake is shown to the agent as contact attributes (`s1_*`), alongside the full chat transcript.
-- **B:**
-  - agent workspace Step-by-Step Guide (intake view with the verified badge and dispatch button);
-  - dispatch Lambda (simulated provider, ETA);
-  - ACW guide.
-- **C:**
-  - chat-to-voice to the member's phone (same interaction);
-  - SMS with driver and ETA;
-  - simulated ServiceNow write-back;
-  - dashboards (later).
+Story: Sarah Mitchell (Plus, M-20481537, 2023 Honda CR-V, ON ABCD 123) has a flat tire with no spare on Highway 401 eastbound near Joyceville Road, Kingston, on a Sunday. She goes from AI web chat, to a live chat with James Rivera, to a voice call, and keeps her context the whole way.
 
-## Pieces
-- **Stack `demo-ccg-s1`** (`template.yaml`):
-  - Cases table;
-  - one Lambda with a function URL:
-    - `POST /get_coverage`, `/create_roadside_case`, `/get_case` (x-api-key);
-    - `GET /` member portal page;
-    - Connect invoke returns the `s1_*` attributes;
-  - Connect: `ccg-s1 Roadside 24x7` hours, `Roadside Assistance` queue, `Roadside Agents` routing profile (chat 2 + voice 1);
-  - flow `ccg-s1-chat`, created once `AcxdApplicationId` and `AcxdDeploymentKey` are set.
-- **Shared with Scenario 5 (`demos/ccg-s5`):** the CRM lookup (`lookupmember`, now by membership number or phone) and authentication (`verifymember`, level `service` = membership number + vehicle). Sarah is in `ccg-s5/data/synthetic.json`.
-- **ACXD:**
-  - flow `ccgroadside` (`acxd/ccg-roadside.flow.json`);
-  - new data requests `getcoverage` and `createroadsidecase`;
-  - reused `lookupmember` (updated schema) and `verifymember`.
+## What the stack builds (`demo-ccg-s1`)
 
-## Operate
-Run these as issue titles:
+The stack is named `demo-*` because the CI role may only create IAM roles with that prefix. All other names follow the brief.
+
+**Tables (seeded from `lambdas/api/seed.json`):**
+- `ccg-s1-members`, with GSI `phone-index` on `phone_key` (the last 10 digits);
+- `ccg-s1-service-history`;
+- `ccg-s1-providers` (Kingston Auto Services plus 2 decoys);
+- `ccg-s1-dispatches`;
+- `ccg-s1-service-records` (mock ServiceNow).
+
+**Lambda `ccg-s1-api`:**
+- Function URL `POST /<op>`, with the header `x-api-key`.
+- Connect invoke reads `Details.Parameters.op` and returns a flat string map (`$.External.<key>`).
+- `GET /` serves the member portal page.
+- Operations: `lookupmember`, `verifyservice`, `coverage`, `dispatch`, `writeback`, `reset`.
+- Every response has `message`. Errors also have `error`, plus `valid_options` where useful.
+- `samples/` holds a success and an error sample for each operation. Regenerate them with `python3 tests/make_samples.py`.
+
+**Connect:**
+- hours `ccg-s1 Roadside 24x7`;
+- queue `Roadside`;
+- predefined attribute `roadside_dispatch` (value `certified`);
+- routing profile `Roadside Agents`: chat 2 and voice 1, cross-channel (ROUTE_ANY_CHANNEL);
+- quick connect to Sarah's demo mobile, once `SarahDemoPhone` is set.
+
+**Overflow:**
+- The chat first waits for an agent with `roadside_dispatch` at level 4 or higher, for `RoadsideOverflowSeconds` (default 90).
+- After that, any agent with the Roadside queue can take it.
+- Overflow to a separate general queue is not built. It would need a customer queue flow, or adding Roadside to the Basic routing profile.
+
+**Chat flow `ccg-s1-chat-main`.** It is created only when `AcxdApplicationId`, `AcxdAlias` and `AcxdReturnPath` are set:
+1. Logging on.
+2. Agentic CX block (`contact_id` = `$.ContactId`, `channel` = `CHAT`).
+3. Escalation: `s1_*` attributes from the returned context variables → routing criteria → `Roadside` queue.
+4. Error: apology, then on to Roadside anyway.
+5. Idle: closing message.
+6. Done: goodbye, then disconnect.
+
+## Operate (issue titles)
+
 - `demo: deploy ccg-s1`
 - `demo: status ccg-s1`
-- `demo: connect-info ccg-s1` (read-only instance summary)
+- `demo: reset ccg-s1` (all tables back to the seed)
 - `demo: test ccg-s1`
+- `demo: connect-info ccg-s1` (read-only)
+- `demo: flow-snapshot ccg-s1` (read-only, Scenario 5 flows)
+- `demo: set-proficiency ccg-s1` (after James exists)
 
-## One-time console step
-Enable chat attachments: Connect console > the instance > Data storage > Attachments > Edit > Enable, using bucket
-`s7-connect-phase1-storagebucket-yjfuv3mn3boh` and prefix `connect/serve7-ccg-demo-222980/Attachments`. This is a console step because
-Connect updates its service-linked role, which CI may not do.
+## Console steps (Milos)
 
-## Demo agent
-User `james.rivera` is created in the Connect console by Milos (he sets the password himself), with:
-- routing profile **Roadside Agents**;
-- security profile **Agent**.
+1. **Attachments.** Data storage > Attachments > Enable:
+   - bucket `s7-connect-phase1-storagebucket-yjfuv3mn3boh`, prefix `connect/serve7-ccg-demo-222980/Attachments`;
+   - chat file types jpg, jpeg, png and heic, up to 10 MB;
+   - S3 CORS for PUT and GET;
+   - a 1-day lifecycle on the staging prefix only.
+2. **Agent user.** Create user `james.rivera`: security profile Agent; he sets his own password. Then run `demo: set-proficiency ccg-s1`.
+3. **Contact Lens.** Turn on Contact Lens generative post-contact summaries, if they are not on already.
+4. **API key secret.** Copy the value of Secrets Manager secret `ccg-s5/acxd-api-key` into a new ACXD secret named `ccg_s1_api_key`. The value is the same key Scenario 5 uses.
+
+## ACXD checklist (Vanja), in build order
+
+**Resources:**
+- Secret `ccg_s1_api_key` (see console step 4).
+- Data requests: External, POST, URL = stack output `AcxdApiUrl` + `/<op>`, header `x-api-key: {ccg_s1_api_key}`:
+  - `lookupmember`: request `member_id` ("membership number exactly as given, e.g. M-20481537") or `phone` ("phone number on the account, digits only").
+  - `verifyservice`: request `member_id`, `vehicle_confirmed` ("the vehicle the member confirmed, or yes"), `interaction_type` ("always service").
+  - `coverage`: request `member_id`, `service` ("one of tow, tire, boost, lockout, fuel").
+  - On all three: response models generated from `samples/<op>.json`, using both shapes. Interim message: "One moment while I check that."
+- Context variables, all with Allow frontend updates on: `contact_id`, `channel`, `memberId`, `tier`, `vehicle`, `authStatus`, `location`, `safety`, `spare`, `serviceType`, `transferSummary`.
+- Guardrails:
+  - input: prompt injection only;
+  - output: "claims dispatch is confirmed", set to Flag.
+
+**Flow `ccgroadsideintake`:**
+- Start → Generative Journey "Roadside intake (chat)" → exits.
+- Prompt order:
+  1. safety first;
+  2. membership number or phone;
+  3. `lookupmember`;
+  4. confirm the vehicle on file;
+  5. `verifyservice`;
+  6. location (free text or landmark);
+  7. invite a photo with the paperclip and acknowledge it in general terms;
+  8. spare or tow;
+  9. `coverage`;
+  10. offer a person.
+- Rules:
+  - call each tool again whenever the member changes a value;
+  - never state a value a tool did not return;
+  - never claim to see the photo;
+  - never confirm a dispatch (only the agent dispatches);
+  - exits are silent;
+  - no em dashes, short sentences, Canadian spelling.
+- After each successful step, set the matching context variable with State modifications.
+- Exit `escalate_agent`:
+  1. Generative text node: summarize `{System.transcript}` in 3 sentences into `transferSummary`.
+  2. Escalate node. Message: "I'm connecting you with a roadside agent now. They'll have everything from our conversation."
+  3. On the Escalate node, add State modifications that set any context variable not yet set.
+- **Correction to the brief:** the ACXD docs pass context back to Connect through State modifications that set context variables. Connect reads them from the Agentic CX namespace by variable name. The brief's query-string Node payload (`auth={authStatus}&...`) is not the documented mechanism. The flow here maps `s1_auth` ← `authStatus`, `s1_tier` ← `tier`, `s1_vehicle` ← `vehicle`, `s1_location` ← `location`, `s1_safety` ← `safety`, `s1_spare` ← `spare`, `s1_service` ← `serviceType`, `s1_member_id` ← `memberId`, `s1_summary` ← `transferSummary`.
+- Exit `done` → Exit application. Leave the Exit node message empty; the Connect flow says goodbye.
+- Wire every Failure and Timeout edge to a recovery Basic node that escalates.
+
+**App `ccg-roadside-intake`:**
+- Welcome, Fallback and Escalation default behaviours → `ccgroadsideintake`. Do not use Build anyway.
+- Build and deploy to Production. Send Claude the app id and the Production deployment key.
+
+**Finding `AcxdReturnPath` (one time).** The flow language reference does not document the JSONPath for the Agentic CX namespace. To find it:
+1. In any scratch flow, add a Set contact attributes block.
+2. Choose Set dynamically > Agentic CX > `transferSummary`, and save.
+3. Claude reads the path with `demo: flow-snapshot ccg-s1 <scratch-flow-name>`, then sets the parameter. That creates `ccg-s1-chat-main`.
+
+## Web chat
+
+`GET /` on the API URL is the member portal page. After the chat flow exists:
+1. Claude creates the chat widget for `ccg-s1-chat-main` and sets the approved origin to the portal URL.
+2. Claude sets `WidgetId`, `WidgetSnippetId` and `WidgetSrc` and redeploys.
+
+The widget is basic chat only, so options are typed rather than buttons. The Touchpoint SDK waits for open item 1 below.
+
+## Phase B and C (next)
+
+- **Guide flow `ccg-s1-guide-roadside`:**
+  - `lookupmember` → S1 view (member card, Verified and Standard badges, pre-filled fields, shop dropdown defaulting to "Nearest certified facility", Initiate Dispatch) → `dispatch` → `s1_dispatch_*`;
+  - Send message SMS, only when `SmsEnabled` = true and an SMS number exists;
+  - hooked from the chat flow with Set event flow (Default flow for Agent UI).
+- **ACW:** start from the AWS default ACW guide, then `writeback`.
+- **Chat to voice:** James dials from the CCP phone tab. This is a new contact linked by `PreviousContactId`.
+
+## Open items (from the brief)
+
+1. Does a Touchpoint chat continue to a live agent after the escalation?
+2. Does Touchpoint support attachments?
+3. Are generative post-contact summaries produced for chat?
+4. Do attributes reach the linked outbound call?
+5. Is there an SMS-enabled number?
+6. CCG facts to confirm: 200 km Plus tow, and the Sunday shop hours (open until 5 PM per the script).
+
+Also: the Agentic CX namespace JSONPath (`AcxdReturnPath`), and Contact Lens real-time analytics for chat (add it in the console, or in the flow once its JSON shape is confirmed).
+
+## Assumptions and invented values
+
+- **Seed data:**
+  - Sarah's phone (+1 613 555 0152), postal code K7L 3N6 and date of birth 1986-04-22 are invented (`demo_value_fields`);
+  - the decoy members and decoy providers carry `demo_value: true`;
+  - Basic 10 km and Premier 320 km coverage carry `demo_value: true`. Plus 200 km comes from the script.
+- **Overflow:** 90 s, then any Roadside agent.
+- **API key:** the same key as Scenario 5, held in ACXD as `ccg_s1_api_key`.
+- **Stack name:** `demo-ccg-s1` (CI IAM limit), not `ccg-s1`.
+- **Sarah in Scenario 5's table:** Sarah's row in `ccg-s5-members` from 14 Oct is no longer used. The Scenario 5 code changes from #21 were reverted in #34 and never deployed.
