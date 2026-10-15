@@ -20,7 +20,7 @@ CASES = {
     "lookupmember": ({"member_id": S}, {"member_id": "M-99999999"}),
     "verifyservice": ({"member_id": S, "vehicle_confirmed": "2023 Honda CR-V", "interaction_type": "service"},
                       {"member_id": S, "vehicle_confirmed": "Ford F-150", "interaction_type": "service"}),
-    "coverage": ({"member_id": S, "service": "tow"}, {"member_id": S, "service": "helicopter"}),
+    "coverage": ({"member_id": S, "service": "tow", "location": "Highway 401 eastbound near Joyceville Road, Kingston", "safety": "safe, off the road", "spare": "no spare"}, {"member_id": S, "service": "helicopter"}),
     "dispatch": ({"member_id": S, "location": "Highway 401 eastbound near Joyceville Road, Kingston", "service": "tow",
                   "destination": "nearest_certified"}, {"member_id": S, "service": "tow"}),
     "writeback": ({"contact_id": "0f8fad5b-d9cb-469f-a165-70867728950e", "member_id": S,
