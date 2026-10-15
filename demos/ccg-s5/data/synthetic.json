@@ -66,29 +66,6 @@
       "sms_capable": true,
       "email": "nadia.haddad@example.com",
       "language": "en"
-    },
-    {
-      "member_id": "M-20481537",
-      "name": "Sarah Mitchell",
-      "tier": "Plus",
-      "phone": "+16135550152",
-      "dob": "1986-04-22",
-      "postal_code": "K7L 3N6",
-      "city": "Kingston, ON",
-      "vehicle": "2023 Honda CR-V",
-      "vehicle_plate": "ON ABCD 123",
-      "member_since": "2019",
-      "service_history": [
-        {
-          "date": "2025-03",
-          "service": "Battery boost",
-          "outcome": "Resolved on site"
-        }
-      ],
-      "open_cases": 0,
-      "sms_capable": true,
-      "email": "sarah.mitchell@example.com",
-      "language": "en"
     }
   ],
   "policies": [

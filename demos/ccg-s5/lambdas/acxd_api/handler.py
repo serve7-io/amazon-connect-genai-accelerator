@@ -68,34 +68,13 @@ AUTH_LEVELS = {
 }
 
 
-def _member_by_phone(raw):
-    """Phone number on the account (any format, last 10 digits) -> member, or None. Small demo table: scan."""
-    d = _digits(raw)[-10:]
-    if len(d) < 10:
-        return None
-    items, kw = [], {}
-    while True:
-        page = c.T_MEMBERS.scan(**kw)
-        items += page.get("Items", [])
-        if "LastEvaluatedKey" not in page:
-            break
-        kw["ExclusiveStartKey"] = page["LastEvaluatedKey"]
-    return next((m for m in items if _digits(m.get("phone"))[-10:] == d), None)
-
-
 def lookup_member(b):
-    """CRM lookup (shared by all scenarios): membership number OR the phone number on the account.
-    Returns who the member is (not yet verified): first name, tier, vehicle, member since, service history, open cases."""
-    raw = b.get("membership_number") or b.get("member_id") or ""
-    m = c.member(_membership(raw)) if raw else None
-    if not m:
-        m = _member_by_phone(b.get("phone") or raw)
+    """Membership number -> who the caller is (before verification: first name and tier only)."""
+    m = c.member(_membership(b.get("membership_number") or b.get("member_id")))
     if not m:
         return {"found": False}
     return {"found": True, "member_id": m["member_id"], "first_name": m["name"].split()[0], "tier": m.get("tier", ""),
-            "vehicle": m.get("vehicle", ""), "vehicle_plate": m.get("vehicle_plate", ""),
-            "member_since": m.get("member_since", ""), "service_history": m.get("service_history", []),
-            "open_cases": int(m.get("open_cases", 0))}
+            "vehicle": m.get("vehicle", "")}
 
 
 def verify_member(b):
