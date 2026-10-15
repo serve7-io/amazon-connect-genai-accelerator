@@ -1,0 +1,32 @@
+{
+  "operation": "writeback",
+  "path": "/writeback",
+  "success": {
+    "request": {
+      "contact_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "member_id": "M-20481537",
+      "disposition": "Roadside, Tow Dispatched",
+      "dispatch_id": "D-20261018-4821",
+      "summary": "Flat tire, no spare, Hwy 401 EB near Joyceville Rd. Safe off the road. Tow to Princess St."
+    },
+    "response": {
+      "written": true,
+      "record_id": "SN-INC3831569",
+      "written_at": "2026-10-15T10:28:04+00:00",
+      "message": "Service record SN-INC3831569 saved."
+    }
+  },
+  "error": {
+    "request": {
+      "member_id": "M-20481537"
+    },
+    "response": {
+      "written": false,
+      "error": "missing_fields",
+      "valid_options": [
+        "contact_id"
+      ],
+      "message": "The service record needs the contact id."
+    }
+  }
+}
