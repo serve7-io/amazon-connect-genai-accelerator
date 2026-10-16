@@ -5,11 +5,12 @@
   "region": "ca-central-1",
   "lambda_dir": "lambdas/api",
   "seed": "lambdas/api/seed.json",
-  "acxd_secret": "ccg_s1_api_key",
+  "acxd_secret": "ccg_s5_api_key",
   "status_tables": [
     "MembersTable",
     "DispatchesTable",
-    "ServiceRecordsTable"
+    "ServiceRecordsTable",
+    "IntakeTable"
   ],
   "instance_id": "78261fe2-310c-4f82-8437-4239487463ac",
   "tags": {
