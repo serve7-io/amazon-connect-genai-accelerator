@@ -13,13 +13,15 @@ The stack is named `demo-*` because the CI role may only create IAM roles with t
 - `ccg-s1-service-history`;
 - `ccg-s1-providers` (Kingston Auto Services plus 2 decoys);
 - `ccg-s1-dispatches`;
-- `ccg-s1-service-records` (mock ServiceNow).
+- `ccg-s1-service-records` (mock ServiceNow);
+- `ccg-s1-intake` (hand-off record per chat contact, 7-day TTL).
 
 **Lambda `ccg-s1-api`:**
 - Function URL `POST /<op>`, with the header `x-api-key`.
 - Connect invoke reads `Details.Parameters.op` and returns a flat string map (`$.External.<key>`).
 - `GET /` serves the member portal page.
-- Operations: `lookupmember`, `verifyservice`, `coverage`, `dispatch`, `writeback`, `reset`.
+- Operations: `lookupmember`, `verifyservice`, `coverage`, `dispatch`, `writeback`, `reset`, `intake`.
+- **Hand-off (16 Oct):** when ACXD calls `lookupmember`, `verifyservice` or `coverage`, the Lambda takes the contact id from ACXD `nlx_context` (never from the model) and merges the successful result into `ccg-s1-intake`. After the escalation, the Connect flow invokes `intake` and sets the `s1_*` attributes from it. This is the same server-side pattern as Scenario 5. It replaces the ACXD state modifications, which cannot use tool results ("placeholders no longer supported" on the Escalate node).
 - Every response has `message`. Errors also have `error`, plus `valid_options` where useful.
 - `samples/` holds a success and an error sample for each operation. Regenerate them with `python3 tests/make_samples.py`.
 
@@ -35,10 +37,10 @@ The stack is named `demo-*` because the CI role may only create IAM roles with t
 - After that, any agent with the Roadside queue can take it.
 - Overflow to a separate general queue is not built. It would need a customer queue flow, or adding Roadside to the Basic routing profile.
 
-**Chat flow `ccg-s1-chat-main`.** It is created only when `AcxdApplicationId`, `AcxdAlias` and `AcxdReturnPath` are set:
-1. Logging on.
+**Chat flow `ccg-s1-chat-main`.** It is created only when `AcxdApplicationId` and `AcxdAlias` are set:
+1. Logging on, then the guide hook (DefaultAgentUI).
 2. Agentic CX block (`contact_id` = `$.ContactId`, `channel` = `CHAT`).
-3. Escalation: `s1_*` attributes from the returned context variables → routing criteria → `Roadside` queue.
+3. Escalation: `intake` (Lambda) → `s1_*` attributes → routing criteria → `Roadside` queue.
 4. Error: apology, then on to Roadside anyway.
 5. Idle: closing message.
 6. Done: goodbye, then disconnect.
@@ -62,18 +64,18 @@ The stack is named `demo-*` because the CI role may only create IAM roles with t
    - a 1-day lifecycle on the staging prefix only.
 2. **Agent user.** Create user `james.rivera`: security profile Agent; he sets his own password. Then run `demo: set-proficiency ccg-s1`.
 3. **Contact Lens.** Turn on Contact Lens generative post-contact summaries, if they are not on already.
-4. **API key secret.** Copy the value of Secrets Manager secret `ccg-s5/acxd-api-key` into a new ACXD secret named `ccg_s1_api_key`. The value is the same key Scenario 5 uses.
+
+The ACXD data requests use the existing ACXD secret `ccg_s5_api_key` (the same key), so no secret step is needed.
 
 ## ACXD checklist (Vanja), in build order
 
 **Resources:**
-- Secret `ccg_s1_api_key` (see console step 4).
-- Data requests: External, POST, URL = stack output `AcxdApiUrl` + `/<op>`, header `x-api-key: {ccg_s1_api_key}`:
+- Data requests (named `s1lookupmember`, `s1verifyservice`, `s1coverage`, because S5 already has `lookupmember`): External, POST, URL = stack output `AcxdApiUrl` + `/<op>`, header `x-api-key: {ccg_s5_api_key}`:
   - `lookupmember`: request `member_id` ("membership number exactly as given, e.g. M-20481537") or `phone` ("phone number on the account, digits only").
   - `verifyservice`: request `member_id`, `vehicle_confirmed` ("the vehicle the member confirmed, or yes"), `interaction_type` ("always service").
   - `coverage`: request `member_id`, `service` ("one of tow, tire, boost, lockout, fuel").
   - On all three: response models generated from `samples/<op>.json`, using both shapes. Interim message: "One moment while I check that."
-- Context variables, all with Allow frontend updates on: `contact_id`, `channel`, `memberId`, `tier`, `vehicle`, `authStatus`, `location`, `safety`, `spare`, `serviceType`, `transferSummary`.
+- Context variables, with Allow frontend updates on: `contact_id` (required: it is how the Lambda ties tool calls to the chat) and `channel`.
 - Guardrails:
   - input: prompt injection only;
   - output: "claims dispatch is confirmed", set to Flag.
@@ -98,23 +100,14 @@ The stack is named `demo-*` because the CI role may only create IAM roles with t
   - never confirm a dispatch (only the agent dispatches);
   - exits are silent;
   - no em dashes, short sentences, Canadian spelling.
-- After each successful step, set the matching context variable with State modifications.
-- Exit `escalate_agent`:
-  1. Generative text node: summarize `{System.transcript}` in 3 sentences into `transferSummary`.
-  2. Escalate node. Message: "I'm connecting you with a roadside agent now. They'll have everything from our conversation."
-  3. On the Escalate node, add State modifications that set any context variable not yet set.
-- **Correction to the brief:** the ACXD docs pass context back to Connect through State modifications that set context variables. Connect reads them from the Agentic CX namespace by variable name. The brief's query-string Node payload (`auth={authStatus}&...`) is not the documented mechanism. The flow here maps `s1_auth` ← `authStatus`, `s1_tier` ← `tier`, `s1_vehicle` ← `vehicle`, `s1_location` ← `location`, `s1_safety` ← `safety`, `s1_spare` ← `spare`, `s1_service` ← `serviceType`, `s1_member_id` ← `memberId`, `s1_summary` ← `transferSummary`.
+- Exit `escalate_agent` → Escalate node. Message: "I'm connecting you with a roadside agent now. They'll have everything from our conversation." No state modifications are needed.
+- **Correction to the brief:** the brief's query-string Node payload (`auth={authStatus}&...`) is not an ACXD mechanism, and Escalate-node state modifications cannot use tool results. The values reach Connect through the server-side intake record instead (see Hand-off above). The hand-off summary is built by `coverage` from checked data, not by a generative text node.
 - Exit `done` → Exit application. Leave the Exit node message empty; the Connect flow says goodbye.
 - Wire every Failure and Timeout edge to a recovery Basic node that escalates.
 
 **App `ccg-roadside-intake`:**
 - Welcome, Fallback and Escalation default behaviours → `ccgroadsideintake`. Do not use Build anyway.
 - Build and deploy to Production. Send Claude the app id and the Production deployment key.
-
-**Finding `AcxdReturnPath` (one time).** The flow language reference does not document the JSONPath for the Agentic CX namespace. To find it:
-1. In any scratch flow, add a Set contact attributes block.
-2. Choose Set dynamically > Agentic CX > `transferSummary`, and save.
-3. Claude reads the path with `demo: flow-snapshot ccg-s1 <scratch-flow-name>`, then sets the parameter. That creates `ccg-s1-chat-main`.
 
 ## Web chat (ACXD Touchpoint)
 
@@ -143,7 +136,7 @@ Milos chose ACXD's own chat (16 Oct), so quick replies, cards and other modaliti
 5. Is there an SMS-enabled number?
 6. CCG facts to confirm: 200 km Plus tow, and the Sunday shop hours (open until 5 PM per the script).
 
-Also: the Agentic CX namespace JSONPath (`AcxdReturnPath`), and Contact Lens real-time analytics for chat (add it in the console, or in the flow once its JSON shape is confirmed).
+Also: Contact Lens real-time analytics for chat (add it in the console, or in the flow once its JSON shape is confirmed).
 
 ## Assumptions and invented values
 
@@ -152,6 +145,6 @@ Also: the Agentic CX namespace JSONPath (`AcxdReturnPath`), and Contact Lens rea
   - the decoy members and decoy providers carry `demo_value: true`;
   - Basic 10 km and Premier 320 km coverage carry `demo_value: true`. Plus 200 km comes from the script.
 - **Overflow:** 90 s, then any Roadside agent.
-- **API key:** the same key as Scenario 5, held in ACXD as `ccg_s1_api_key`.
+- **API key:** the same key as Scenario 5, used in ACXD as the existing secret `ccg_s5_api_key`.
 - **Stack name:** `demo-ccg-s1` (CI IAM limit), not `ccg-s1`.
 - **Sarah in Scenario 5's table:** Sarah's row in `ccg-s5-members` from 14 Oct is no longer used. The Scenario 5 code changes from #21 were reverted in #34 and never deployed.

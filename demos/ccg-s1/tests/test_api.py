@@ -204,6 +204,28 @@ def test_start_chat_not_ready_and_portal_loads_touchpoint(api, monkeypatch):
     assert "@amazon-connect-touchpoint/web@1.0.3/lib/index.umd.js" in page and '"inst-1"' in page
 
 
+def test_intake_record_from_tool_calls_reaches_connect(api):
+    cid = "6a2b1c4d-0000-4000-8000-0000000000a1"
+    ctx = {"nlx_context": {"contact_id": cid}}
+    assert call(api, "intake", {"contact_id": cid})[1]["found"] is False
+    call(api, "lookupmember", {"member_id": SARAH, **ctx})
+    call(api, "verifyservice", {"member_id": SARAH, "vehicle_confirmed": "yes", **ctx})
+    call(api, "coverage", {"member_id": SARAH, "service": "tow", "location": "Hwy 401 EB near Joyceville Rd",
+                           "safety": "safe, off the road", "spare": "no spare", **ctx})
+    call(api, "lookupmember", {"member_id": "M-99999999", **ctx})  # a miss never overwrites the record
+    call(api, "coverage", {"member_id": SARAH, "service": "x", **ctx})  # nor does a failed tool call
+    out = api.h.handler({"Details": {"Parameters": {"op": "intake"}, "ContactData": {"ContactId": cid}}}, None)
+    assert out["found"] == "true" and out["member_id"] == SARAH and out["tier"] == "Plus"
+    assert out["vehicle"] == "2023 Honda CR-V" and out["auth_status"] == "Verified" and out["service"] == "tow"
+    assert (out["location"], out["safety"], out["spare"]) == ("Hwy 401 EB near Joyceville Rd", "safe, off the road", "no spare")
+    assert out["summary"].startswith("Sarah Mitchell, Plus member M-20481537.")
+    other = api.h.handler({"Details": {"Parameters": {"op": "intake"}, "ContactData": {"ContactId": "c-other"}}}, None)
+    assert other["found"] == "false"
+    call(api, "lookupmember", {"member_id": SARAH, "contact_id": "not-a-uuid"})  # model-supplied ids are ignored
+    assert len(api.db.scan("IntakeTable")) == 1
+    assert call(api, "reset", {"member_id": SARAH})[1]["removed"] == 1 and api.db.scan("IntakeTable") == []
+
+
 def test_customer_facing_text_has_no_em_dashes(api):
     src = (ROOT / "lambdas" / "api" / "handler.py").read_text()
     assert "—" not in src

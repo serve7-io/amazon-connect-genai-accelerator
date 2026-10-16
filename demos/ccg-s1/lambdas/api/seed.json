@@ -94,6 +94,7 @@
       }
     ],
     "DispatchesTable": [],
-    "ServiceRecordsTable": []
+    "ServiceRecordsTable": [],
+    "IntakeTable": []
   }
 }
