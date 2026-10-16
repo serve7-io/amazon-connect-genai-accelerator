@@ -4,7 +4,8 @@ Two event shapes, one set of operations (built to Vanja's Scenario 1 build brief
 1. Function URL, from ACXD data requests: POST /<op>, header x-api-key, JSON body. Returns JSON.
 2. Amazon Connect Invoke Lambda, from flows and guides: op in Details.Parameters.op, the other parameters next to it.
    Returns a flat string map (Connect reads it as $.External.<key>).
-Also: GET / is the member portal demo page with the Connect chat widget, and POST /health is used by the smoke test.
+Also: GET / is the member portal demo page with the ACXD Touchpoint web chat, POST /start-chat starts that chat
+(StartChatContact, flow fixed server-side), and POST /health is used by the smoke test.
 
 Operations (every response has a ready-to-say "message"; errors add "error" and, where useful, "valid_options"):
   lookupmember   member_id or phone -> member card (first name, tier, vehicle, member since, prior calls, last service)
@@ -382,6 +383,58 @@ def connect_invoke(event):
     return _flat(_clean(out))
 
 
+# ---------- web chat start (POST /start-chat, called by the ACXD Touchpoint chat on the portal page) ----------
+# Browser-facing and keyless by design (like the AWS StartChatContact sample), but locked down: the instance and the
+# contact flow are fixed server-side (whatever the browser sends is ignored), only the display name is taken from the
+# request, and the only attribute set is s1_entry=portal.
+ALLOWED_CONTENT_TYPES = ["text/plain", "text/markdown", "application/json",
+                         "application/vnd.amazonaws.connect.message.interactive",
+                         "application/vnd.amazonaws.connect.message.interactive.response"]
+CONNECT = None
+_FLOW_ID = {}
+
+
+def connect():
+    global CONNECT
+    if CONNECT is None:
+        import boto3
+        CONNECT = boto3.client("connect")
+    return CONNECT
+
+
+def _chat_flow_id():
+    name = os.environ.get("CHAT_FLOW_NAME", "ccg-s1-chat-main")
+    if name not in _FLOW_ID:
+        c, kw = connect(), {"InstanceId": os.environ["INSTANCE_ID"], "ContactFlowTypes": ["CONTACT_FLOW"]}
+        while True:
+            r = c.list_contact_flows(**kw)
+            hit = next((f["Id"] for f in r.get("ContactFlowSummaryList", []) if f["Name"] == name), None)
+            if hit or not r.get("NextToken"):
+                break
+            kw["NextToken"] = r["NextToken"]
+        if not hit:
+            return None
+        _FLOW_ID[name] = hit
+    return _FLOW_ID[name]
+
+
+def start_chat(body):
+    flow_id = _chat_flow_id()
+    if not flow_id:
+        return 503, {"error": "chat_not_ready", "message": "Chat is not available yet."}
+    name = str(((body.get("ParticipantDetails") or {}).get("DisplayName")) or "Member")
+    name = re.sub(r"[^\w .'-]", "", name)[:40].strip() or "Member"
+    types = [t for t in (body.get("SupportedMessagingContentTypes") or ALLOWED_CONTENT_TYPES) if t in ALLOWED_CONTENT_TYPES]
+    if "text/plain" not in types:
+        types = ["text/plain"] + types
+    r = connect().start_chat_contact(InstanceId=os.environ["INSTANCE_ID"], ContactFlowId=flow_id,
+                                     ParticipantDetails={"DisplayName": name}, Attributes={"s1_entry": "portal"},
+                                     SupportedMessagingContentTypes=types)
+    print({"start_chat": "ok", "contact_id": r["ContactId"]})
+    return 200, {"data": {"startChatResult": {"ContactId": r["ContactId"], "ParticipantId": r["ParticipantId"],
+                                              "ParticipantToken": r["ParticipantToken"]}}}
+
+
 # ---------- member portal page (GET /) ----------
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Member portal (demo)</title><style>
@@ -409,20 +462,27 @@ check your membership, find your location and arrange a tow. You can ask for a r
 __WIDGET__
 </body></html>"""
 
-WIDGET = """<script type="text/javascript">
-(function(w,d,x,id){s=d.createElement('script');s.src='__SRC__';s.async=1;s.id=id;
-d.getElementsByTagName('head')[0].appendChild(s);w[x]=w[x]||function(){(w[x].ac=w[x].ac||[]).push(arguments)};})
-(window,document,'amazon_connect','__WIDGET_ID__');
-amazon_connect('styles',{iconType:'CHAT',openChat:{color:'#ffffff',backgroundColor:'#00539b'},closeChat:{color:'#ffffff',backgroundColor:'#00539b'}});
-amazon_connect('snippetId','__SNIPPET_ID__');
-amazon_connect('supportedMessagingContentTypes',['text/plain','text/markdown','application/vnd.amazonaws.connect.message.interactive','application/vnd.amazonaws.connect.message.interactive.response']);
+TOUCHPOINT_VERSION = "1.0.3"  # @amazon-connect-touchpoint/web, pinned
+TOUCHPOINT = """<script src="https://cdn.jsdelivr.net/npm/@amazon-connect-touchpoint/web@__VER__/lib/index.umd.js"></script>
+<script>
+amazonConnectTouchpoint.create({
+  config: {chatEndpoint: location.origin + "/start-chat", instanceId: "__INSTANCE__", contactFlowId: "set-server-side",
+           region: "__REGION__", participantDisplayName: "Member"},
+  input: "text",
+  windowSize: "floating",
+  theme: {accent: "#00539b"},
+  showParticipantInfo: true,
+  assistantName: "CAA Assistant",
+  userMessageBubble: true,
+  agentMessageBubble: true
+});
 </script>"""
 
 
 def _page():
-    wid, snip, src = os.environ.get("WIDGET_ID", ""), os.environ.get("WIDGET_SNIPPET_ID", ""), os.environ.get("WIDGET_SRC", "")
-    w = (WIDGET.replace("__SRC__", src).replace("__WIDGET_ID__", wid).replace("__SNIPPET_ID__", snip)
-         if wid and snip and src else "<!-- chat widget not configured yet -->")
+    inst, region = os.environ.get("INSTANCE_ID", ""), os.environ.get("AWS_REGION", "ca-central-1")
+    w = (TOUCHPOINT.replace("__VER__", TOUCHPOINT_VERSION).replace("__INSTANCE__", inst).replace("__REGION__", region)
+         if inst else "<!-- chat not configured -->")
     return {"statusCode": 200, "headers": {"content-type": "text/html; charset=utf-8", "cache-control": "no-store"},
             "body": PAGE.replace("__WIDGET__", w)}
 
@@ -474,6 +534,13 @@ def handler(event, _ctx):
     path = (event.get("rawPath") or "/").strip("/")
     if method == "GET" and path in ("", "portal"):
         return _page()
+    if method == "POST" and path == "start-chat":
+        try:
+            req = json.loads(event.get("body") or "{}")
+        except json.JSONDecodeError:
+            req = {}
+        code, out = start_chat(req if isinstance(req, dict) else {})
+        return _resp(code, out)
     if path == "health":
         members = len(SEED["tables"].get("MembersTable", []))
         return _resp(200, {"ok": True, "units": members, "key_configured": bool(os.environ.get("API_KEY"))})

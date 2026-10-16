@@ -49,15 +49,6 @@ Parameters:
     Type: String
     Default: ""
     Description: E.164 demo mobile for the outbound quick connect (empty = no quick connect yet)
-  WidgetId:
-    Type: String
-    Default: ""
-  WidgetSnippetId:
-    Type: String
-    Default: ""
-  WidgetSrc:
-    Type: String
-    Default: ""
 
 Conditions:
   HasAcxd: !And
@@ -139,6 +130,18 @@ Resources:
                   - !GetAtt ProvidersTable.Arn
                   - !GetAtt DispatchesTable.Arn
                   - !GetAtt ServiceRecordsTable.Arn
+        - PolicyName: web-chat   # POST /start-chat (ACXD Touchpoint chat on the portal page)
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: connect:StartChatContact
+                Resource: !Sub "${ConnectInstanceArn}/contact-flow/*"
+              - Effect: Allow
+                Action: connect:ListContactFlows
+                Resource:
+                  - !Ref ConnectInstanceArn
+                  - !Sub "${ConnectInstanceArn}/contact-flow/*"
 
   ApiFunction:
     Type: AWS::Lambda::Function
@@ -160,9 +163,8 @@ Resources:
           RECORDS_TABLE: !Ref ServiceRecordsTable
           API_KEY: !Sub "{{resolve:secretsmanager:${ApiKeySecretArn}}}"
           SMS_ENABLED: !Ref SmsEnabled
-          WIDGET_ID: !Ref WidgetId
-          WIDGET_SNIPPET_ID: !Ref WidgetSnippetId
-          WIDGET_SRC: !Ref WidgetSrc
+          INSTANCE_ID: !Select [1, !Split ["instance/", !Ref ConnectInstanceArn]]
+          CHAT_FLOW_NAME: ccg-s1-chat-main
   ApiFunctionUrl:
     Type: AWS::Lambda::Url
     Properties:

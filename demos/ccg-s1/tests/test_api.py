@@ -166,6 +166,44 @@ def test_key_health_portal_and_context_contact_id(api):
     assert api.db.get("ServiceRecordsTable", {"contact_id": cid})["record_id"] == out["record_id"]
 
 
+def test_start_chat_uses_server_side_flow_and_sanitizes(api, monkeypatch):
+    calls = {}
+
+    class FakeConnect:
+        def list_contact_flows(self, **kw):
+            return {"ContactFlowSummaryList": [{"Name": "other", "Id": "f-0"}, {"Name": "ccg-s1-chat-main", "Id": "f-1"}]}
+
+        def start_chat_contact(self, **kw):
+            calls.update(kw)
+            return {"ContactId": "c-1", "ParticipantId": "p-1", "ParticipantToken": "t-1"}
+
+    monkeypatch.setenv("INSTANCE_ID", "inst-1")
+    monkeypatch.setattr(api.h, "CONNECT", FakeConnect())
+    api.h._FLOW_ID.clear()
+    body = {"InstanceId": "evil", "ContactFlowId": "evil", "ParticipantDetails": {"DisplayName": "Sarah<script>"},
+            "Attributes": {"x": "y"}, "SupportedMessagingContentTypes": ["text/plain", "text/html"]}
+    r = api.h.handler({"rawPath": "/start-chat", "body": json.dumps(body), "requestContext": {"http": {"method": "POST"}}}, None)
+    assert r["statusCode"] == 200
+    assert json.loads(r["body"]) == {"data": {"startChatResult": {"ContactId": "c-1", "ParticipantId": "p-1", "ParticipantToken": "t-1"}}}
+    assert calls["InstanceId"] == "inst-1" and calls["ContactFlowId"] == "f-1"
+    assert calls["ParticipantDetails"] == {"DisplayName": "Sarahscript"} and calls["Attributes"] == {"s1_entry": "portal"}
+    assert calls["SupportedMessagingContentTypes"] == ["text/plain"]
+
+
+def test_start_chat_not_ready_and_portal_loads_touchpoint(api, monkeypatch):
+    class NoFlow:
+        def list_contact_flows(self, **kw):
+            return {"ContactFlowSummaryList": []}
+
+    monkeypatch.setenv("INSTANCE_ID", "inst-1")
+    monkeypatch.setattr(api.h, "CONNECT", NoFlow())
+    api.h._FLOW_ID.clear()
+    r = api.h.handler({"rawPath": "/start-chat", "body": "{}", "requestContext": {"http": {"method": "POST"}}}, None)
+    assert r["statusCode"] == 503 and json.loads(r["body"])["error"] == "chat_not_ready"
+    page = api.h.handler({"rawPath": "/", "requestContext": {"http": {"method": "GET"}}}, None)["body"]
+    assert "@amazon-connect-touchpoint/web@1.0.3/lib/index.umd.js" in page and '"inst-1"' in page
+
+
 def test_customer_facing_text_has_no_em_dashes(api):
     src = (ROOT / "lambdas" / "api" / "handler.py").read_text()
     assert "—" not in src

@@ -116,13 +116,14 @@ The stack is named `demo-*` because the CI role may only create IAM roles with t
 2. Choose Set dynamically > Agentic CX > `transferSummary`, and save.
 3. Claude reads the path with `demo: flow-snapshot ccg-s1 <scratch-flow-name>`, then sets the parameter. That creates `ccg-s1-chat-main`.
 
-## Web chat
+## Web chat (ACXD Touchpoint)
 
-`GET /` on the API URL is the member portal page. After the chat flow exists:
-1. Claude creates the chat widget for `ccg-s1-chat-main` and sets the approved origin to the portal URL.
-2. Claude sets `WidgetId`, `WidgetSnippetId` and `WidgetSrc` and redeploys.
+Milos chose ACXD's own chat (16 Oct), so quick replies, cards and other modalities can render.
 
-The widget is basic chat only, so options are typed rather than buttons. The Touchpoint SDK waits for open item 1 below.
+- `GET /` on the API URL is the member portal page. It loads `@amazon-connect-touchpoint/web` (pinned to 1.0.3, from jsDelivr) as a floating chat.
+- `POST /start-chat` is the browser endpoint Touchpoint calls. It runs Connect `StartChatContact` with the instance and the flow `ccg-s1-chat-main` fixed server-side; only the display name comes from the browser. It returns 503 `chat_not_ready` until the flow exists.
+- Plain chat needs no ACXD API key. That key is only for Live Sync, which this demo does not use.
+- The chat is a normal Connect chat contact, so the escalation to James in the Roadside queue works as with any chat.
 
 ## Phase B and C (next)
 
@@ -135,7 +136,7 @@ The widget is basic chat only, so options are typed rather than buttons. The Tou
 
 ## Open items (from the brief)
 
-1. Does a Touchpoint chat continue to a live agent after the escalation?
+1. Touchpoint chat to live agent: expected to work, because Touchpoint runs on a normal Connect chat contact (StartChatContact + ChatJS). Confirm in the first test chat.
 2. Does Touchpoint support attachments?
 3. Are generative post-contact summaries produced for chat?
 4. Do attributes reach the linked outbound call?
