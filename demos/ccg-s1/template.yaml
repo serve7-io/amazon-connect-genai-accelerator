@@ -34,13 +34,6 @@ Parameters:
     Type: String
     Default: ""
     Description: Production deployment key of ccg-roadside-intake
-  AcxdReturnPath:
-    Type: String
-    Default: ""
-    Description: >-
-      JSONPath prefix the Connect flow uses for values returned by the Agentic CX block (the "Agentic CX" namespace in
-      Set contact attributes), without the trailing dot. Not documented in the flow language reference; read it from a
-      console-built Set contact attributes block once, then set it here.
   RoadsideOverflowSeconds:
     Type: Number
     Default: 90
@@ -54,7 +47,6 @@ Conditions:
   HasAcxd: !And
     - !Not [!Equals [!Ref AcxdApplicationId, ""]]
     - !Not [!Equals [!Ref AcxdAlias, ""]]
-    - !Not [!Equals [!Ref AcxdReturnPath, ""]]
   HasSarahPhone: !Not [!Equals [!Ref SarahDemoPhone, ""]]
 
 Resources:
@@ -107,6 +99,15 @@ Resources:
       AttributeDefinitions: [{AttributeName: contact_id, AttributeType: S}]
       KeySchema: [{AttributeName: contact_id, KeyType: HASH}]
       SSESpecification: {SSEEnabled: true}
+  IntakeTable:   # server-side hand-off: what the ACXD tools returned during the chat, keyed by Connect contact id
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ccg-s1-intake
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: contact_id, AttributeType: S}]
+      KeySchema: [{AttributeName: contact_id, KeyType: HASH}]
+      TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
+      SSESpecification: {SSEEnabled: true}
 
   # ---------- API ----------
   ApiRole:
@@ -130,6 +131,7 @@ Resources:
                   - !GetAtt ProvidersTable.Arn
                   - !GetAtt DispatchesTable.Arn
                   - !GetAtt ServiceRecordsTable.Arn
+                  - !GetAtt IntakeTable.Arn
         - PolicyName: web-chat   # POST /start-chat (ACXD Touchpoint chat on the portal page)
           PolicyDocument:
             Version: "2012-10-17"
@@ -161,6 +163,7 @@ Resources:
           PROVIDERS_TABLE: !Ref ProvidersTable
           DISPATCHES_TABLE: !Ref DispatchesTable
           RECORDS_TABLE: !Ref ServiceRecordsTable
+          INTAKE_TABLE: !Ref IntakeTable
           API_KEY: !Sub "{{resolve:secretsmanager:${ApiKeySecretArn}}}"
           SMS_ENABLED: !Ref SmsEnabled
           INSTANCE_ID: !Select [1, !Split ["instance/", !Ref ConnectInstanceArn]]
@@ -407,9 +410,9 @@ Resources:
       Name: ccg-s1-chat-main
       Type: CONTACT_FLOW
       Description: >-
-        CAA Scenario 1 web chat. ACXD app ccg-roadside-intake does the intake; on escalation its context variables
-        become s1_* contact attributes and the chat goes to the Roadside queue (same contact, full transcript).
-        Errors also go to Roadside.
+        CAA Scenario 1 web chat. ACXD app ccg-roadside-intake does the intake; on escalation the intake record that
+        its tool calls wrote (ccg-s1-api op intake, by contact id) becomes s1_* contact attributes and the chat goes to
+        the Roadside queue (same contact, full transcript). Errors also go to Roadside.
       Content: !Sub
         - |
           {
@@ -428,13 +431,18 @@ Resources:
                  "Errors": [{"NextAction": "error-msg", "ErrorType": "NoMatchingError"},
                             {"NextAction": "bye-msg", "ErrorType": "NoMatchingCondition"},
                             {"NextAction": "idle-msg", "ErrorType": "InputTimeLimitExceeded"}],
-                 "Conditions": [{"NextAction": "attrs", "Condition": {"Operator": "Equals", "Operands": ["Escalation"]}}]}},
+                 "Conditions": [{"NextAction": "intake", "Condition": {"Operator": "Equals", "Operands": ["Escalation"]}}]}},
+              {"Identifier": "intake", "Type": "InvokeLambdaFunction",
+               "Parameters": {"LambdaFunctionARN": "${ApiFunction.Arn}", "InvocationTimeLimitSeconds": "8",
+                 "LambdaInvocationAttributes": {"op": "intake"},
+                 "ResponseValidation": {"ResponseType": "STRING_MAP"}},
+               "Transitions": {"NextAction": "attrs", "Errors": [{"NextAction": "routing", "ErrorType": "NoMatchingError"}]}},
               {"Identifier": "attrs", "Type": "UpdateContactAttributes",
                "Parameters": {"TargetContact": "Current", "Attributes": {
-                 "s1_auth": "${P}.authStatus", "s1_tier": "${P}.tier", "s1_vehicle": "${P}.vehicle",
-                 "s1_location": "${P}.location", "s1_safety": "${P}.safety", "s1_spare": "${P}.spare",
-                 "s1_service": "${P}.serviceType", "s1_member_id": "${P}.memberId", "s1_summary": "${P}.transferSummary",
-                 "s1_channel_path": "web chat (AI) to live agent"}},
+                 "s1_auth": "$.External.auth_status", "s1_tier": "$.External.tier", "s1_vehicle": "$.External.vehicle",
+                 "s1_location": "$.External.location", "s1_safety": "$.External.safety", "s1_spare": "$.External.spare",
+                 "s1_service": "$.External.service", "s1_member_id": "$.External.member_id",
+                 "s1_summary": "$.External.summary", "s1_channel_path": "web chat (AI) to live agent"}},
                "Transitions": {"NextAction": "routing", "Errors": [{"NextAction": "routing", "ErrorType": "NoMatchingError"}]}},
               {"Identifier": "routing", "Type": "UpdateContactRoutingBehavior",
                "Parameters": {"RoutingCriteria": {"Steps": [{
@@ -463,7 +471,7 @@ Resources:
               {"Identifier": "bye", "Type": "DisconnectParticipant", "Parameters": {}, "Transitions": {}}
             ]
           }
-        - P: !Ref AcxdReturnPath
+        - {}
 
 Outputs:
   AcxdApiUrl:
@@ -482,6 +490,8 @@ Outputs:
     Value: !Ref DispatchesTable
   ServiceRecordsTable:
     Value: !Ref ServiceRecordsTable
+  IntakeTable:
+    Value: !Ref IntakeTable
   RoadsideQueueArn:
     Value: !GetAtt RoadsideQueue.QueueArn
   RoadsideRoutingProfileArn:
