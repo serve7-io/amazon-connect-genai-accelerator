@@ -14,7 +14,11 @@ Operations (every response has a ready-to-say "message"; errors add "error" and,
   coverage       tier + service -> covered, tow km included, cost to member
   dispatch       creates a dispatch record (provider, driver, ETA, destination). Shared with Scenario 3.
   writeback      mock ServiceNow: writes the service record for the contact
-  reset          restores the member's demo state (seed rows back, their dispatches and service records removed)
+  reset          restores the member's demo state (seed rows back, their dispatches, service records and intakes removed)
+  intake         (Connect invoke, after the ACXD escalation) the intake record for this contact: what the ACXD tools
+                 returned during the chat (member, tier, vehicle, verification, location, safety, spare, service,
+                 hand-off summary). Written server-side whenever lookupmember, verifyservice or coverage is called
+                 with the contact id from ACXD nlx_context, so the values come from the tools, never from the model.
 """
 import datetime as dt
 import hmac
@@ -29,9 +33,10 @@ SEED = json.loads((Path(__file__).resolve().parent / "seed.json").read_text())
 
 # Output name in seed.json -> environment variable holding the table name
 TABLE_ENV = {"MembersTable": "MEMBERS_TABLE", "ServiceHistoryTable": "HISTORY_TABLE", "ProvidersTable": "PROVIDERS_TABLE",
-             "DispatchesTable": "DISPATCHES_TABLE", "ServiceRecordsTable": "RECORDS_TABLE"}
+             "DispatchesTable": "DISPATCHES_TABLE", "ServiceRecordsTable": "RECORDS_TABLE", "IntakeTable": "INTAKE_TABLE"}
 KEYS = {"MembersTable": ["member_id"], "ServiceHistoryTable": ["member_id", "event_date"],
-        "ProvidersTable": ["provider_id"], "DispatchesTable": ["dispatch_id"], "ServiceRecordsTable": ["contact_id"]}
+        "ProvidersTable": ["provider_id"], "DispatchesTable": ["dispatch_id"], "ServiceRecordsTable": ["contact_id"],
+        "IntakeTable": ["contact_id"]}
 
 # Coverage by tier. Plus 200 km comes from the demo script; the other values are demo values (not CCG facts).
 COVERAGE = {
@@ -333,10 +338,11 @@ def reset(b):
         if r.get("member_id") == mid:
             d.delete("DispatchesTable", {"dispatch_id": r["dispatch_id"]})
             removed += 1
-    for r in d.scan("ServiceRecordsTable"):
-        if r.get("member_id") == mid:
-            d.delete("ServiceRecordsTable", {"contact_id": r["contact_id"]})
-            removed += 1
+    for table in ("ServiceRecordsTable", "IntakeTable"):
+        for r in d.scan(table):
+            if r.get("member_id") == mid:
+                d.delete(table, {"contact_id": r["contact_id"]})
+                removed += 1
     return {"ok": True, "member_id": mid, "removed": removed, "message": f"Demo state for {mid} restored."}
 
 
@@ -350,7 +356,43 @@ def _decimals(o):
     return o
 
 
-OPS = {f.__name__: f for f in (lookupmember, verifyservice, coverage, dispatch, writeback, reset)}
+# ---------- intake record (server-side hand-off from the ACXD chat to the Connect flow) ----------
+INTAKE_FIELDS = {  # op -> {intake field: tool result field}; written only from successful tool results
+    "lookupmember": {"member_id": "member_id", "first_name": "first_name", "tier": "tier", "vehicle": "vehicle_spoken"},
+    "verifyservice": {"auth_status": "auth_status", "member_id": "member_id"},
+    "coverage": {"tier": "tier", "service": "service", "location": "location", "safety": "safety", "spare": "spare",
+                 "summary": "summary"},
+}
+INTAKE_OK = {"lookupmember": "found", "verifyservice": "auth_status", "coverage": "covered"}
+
+
+def _record_intake(op, cid, out):
+    """Merge what a tool returned into the intake record for this chat contact (verified data only)."""
+    if not cid or op not in INTAKE_FIELDS or not out.get(INTAKE_OK[op]):
+        return False
+    rec = db().get("IntakeTable", {"contact_id": cid}) or {"contact_id": cid}
+    rec.update({k: str(_num(out[src])) for k, src in INTAKE_FIELDS[op].items() if out.get(src) not in (None, "")})
+    now = _now()
+    rec["updated_at"] = now.isoformat(timespec="seconds")
+    rec["expires_at"] = int(now.timestamp()) + 7 * 24 * 3600  # DynamoDB TTL
+    db().put("IntakeTable", rec)
+    return True
+
+
+def intake(b):
+    cid = str(b.get("contact_id") or "").strip()
+    rec = db().get("IntakeTable", {"contact_id": cid}) if cid else None
+    if not rec:
+        return {"found": False, "error": "no_intake", "message": "No intake was recorded for this contact."}
+    fields = ("member_id", "first_name", "tier", "vehicle", "auth_status", "location", "safety", "spare", "service",
+              "summary")
+    out = {"found": True, **{f: str(rec.get(f, "")) for f in fields}}
+    out["auth_status"] = out["auth_status"] or "Not verified"
+    out["message"] = "Intake loaded."
+    return out
+
+
+OPS = {f.__name__: f for f in (lookupmember, verifyservice, coverage, dispatch, writeback, reset, intake)}
 
 
 # ---------- Amazon Connect (Invoke Lambda) ----------
@@ -557,5 +599,8 @@ def handler(event, _ctx):
         body = _fields(json.loads(raw))
     except json.JSONDecodeError:
         return _resp(400, {"error": "bad_json", "message": "The request was not valid JSON."})
-    print({"op": path, "keys": sorted(body), "contact_id_from_context": bool(body.get("contact_id"))})
-    return _resp(200, OPS[path](body))
+    out = OPS[path](body)
+    cid = body.get("contact_id") if _UUID.fullmatch(str(body.get("contact_id") or "")) else ""
+    saved = _record_intake(path, cid, out)
+    print({"op": path, "keys": sorted(body), "contact_id_from_context": bool(cid), "intake_saved": saved})
+    return _resp(200, out)
