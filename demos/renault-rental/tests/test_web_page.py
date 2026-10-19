@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 KIT_WEB = ROOT.parent / "_kit" / "web"
@@ -100,3 +101,34 @@ def test_rendered_inline_script_is_valid_javascript(tmp_path):
     f.write_text(script, encoding="utf-8")
     r = subprocess.run(["node", "--check", str(f)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+class _Loader(yaml.SafeLoader):
+    pass
+
+
+def _tag(loader, suffix, node):
+    if isinstance(node, yaml.ScalarNode):
+        return {"!" + suffix: loader.construct_scalar(node)}
+    if isinstance(node, yaml.SequenceNode):
+        return {"!" + suffix: loader.construct_sequence(node, deep=True)}
+    return {"!" + suffix: loader.construct_mapping(node, deep=True)}
+
+
+_Loader.add_multi_constructor("!", _tag)
+
+
+def test_connect_chat_flow_greets_before_handing_over_to_the_live_sync_agent():
+    """The Live Sync node does not speak first. The web chat shows 'Thinking...' and no input box until a first
+    message arrives, so the Connect flow must send the greeting itself, before the Agentic CX block."""
+    t = yaml.load((ROOT / "template.yaml").read_text(encoding="utf-8"), Loader=_Loader)
+    sub = t["Resources"]["ChatFlow"]["Properties"]["Content"]["!Sub"]
+    doc = json.loads(re.sub(r"\$\{(\w+)\}", "x", sub))
+    actions = {a["Identifier"]: a for a in doc["Actions"]}
+    agent = next(a["Identifier"] for a in doc["Actions"] if a["Type"] == "ConnectParticipantWithAgenticCX")
+    step, seen = doc["StartAction"], []
+    while step != agent:
+        seen.append(step)
+        step = actions[step]["Transitions"]["NextAction"]
+    greet = [actions[i] for i in seen if actions[i]["Type"] == "MessageParticipant"]
+    assert greet and "Zdravo!" in greet[0]["Parameters"]["Text"] and "How can I help?" in greet[0]["Parameters"]["Text"]
