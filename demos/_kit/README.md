@@ -17,6 +17,7 @@ through GitHub issues. Account 480315222980, ca-central-1. **Synthetic data only
 ## Operations (open an issue titled `demo: <command> <demo> [args]`)
 - `deploy <demo>`: create or update the stack, seed empty tables, smoke test, print the data request URLs
 - `status <demo>` · `seed <demo>` · `reset <demo>` (reload the seed) · `test <demo>`
+- `web <demo>`: re-publish the demo's web test page only (see below)
 - admin commands, e.g. `set-price yamaha-moto mt07 70`, `maintenance yamaha-moto YM-MT07-02 on`
 - `delete <demo>`: the issue body must contain `confirm delete <demo>`. This removes the stack, its data and its code. The ACXD app is removed in ACXD.
 
@@ -30,3 +31,55 @@ ccg-s5 schedules that secret for deletion. After that, demos fall back to a new 
 
 ## ACXD (manual, once per demo)
 Import the data requests (with this stack's URL, printed by `deploy`), then the flow and the application. Then click **Build & deploy**, which stays a human click.
+
+## Web test page (CloudFront)
+Every demo with a `"web"` block in `demo.json` gets a test page at `https://<cloudfront domain>/<demo>/` with the ACXD
+chat (Amazon Connect Touchpoint) and, optionally, Live Sync. `deploy` publishes it as step 6 of 6; `demo: web <demo>` republishes it.
+
+How it works:
+- **One shared stack, `demo-kit-web`** (`web/stack.yaml`): a private S3 bucket behind one CloudFront distribution (HTTPS only, default
+  `*.cloudfront.net` domain, `X-Robots-Tag: noindex`, `robots.txt` disallow all). Each demo is a folder `/<demo>/`. The stack is created
+  by the first demo that needs it and kept when a demo is deleted.
+- **The chat goes through Amazon Connect**, not straight to ACXD: Touchpoint starts a Connect chat contact, and a Connect chat flow with
+  the Agentic CX block hands it to the ACXD app. So each demo template has a conditional `ChatFlow` (created only when the Connect
+  instance, ACXD workspace, application id and the app's Production deployment key are all known).
+- **`POST /<demo>/start-chat`** is a small Lambda on the same CloudFront domain (`web/start_chat/`). It is keyless like the AWS sample, but
+  locked down: the instance and flow come from SSM `/demo-kit/web/<demo>/chat` (written by `deploy-web.sh`), the browser can only
+  choose the display name, and only demos deployed through the kit can start a chat.
+- **Touchpoint** (`@amazon-connect-touchpoint/web`) is pinned to 1.0.4 with a Subresource Integrity hash (`web/render.py`).
+
+The `web` block in `demo.json`:
+| Key | What |
+|---|---|
+| `title`, `brand`, `blurb`, `prompts` | Page text; `prompts` are the "Try asking" suggestions |
+| `assistant_name`, `display_name`, `accent`, `language` | Chat widget identity, default visitor name, accent colour, language code |
+| `connect_instance_id` | The Connect instance that runs the chat |
+| `acxd.workspace_id`, `acxd.application_id` | The ACXD workspace and the demo's application (ids only, no secrets) |
+
+Optional `demos/<demo>/web/actions.js` is inserted after Touchpoint starts and can use the variable `touchpoint`.
+
+### One-time setup per account
+1. **CI role.** The role `serve7-ccg-s5-ci` needs CloudFront permissions (policy `demo-kit-web` in `demos/ccg-s5/ci/github-trust.yaml`). Re-run in CloudShell
+   of the demo account: `bash demos/ccg-s5/ci/setup-github-trust.sh`. Until then the web step of a deploy warns and is skipped, the API still deploys.
+2. **Keys per demo.** In CloudShell: `bash demos/_kit/web/set-acxd-keys.sh <demo>`. It asks (hidden) for the app's Production deployment key
+   and, optionally, the Live Sync API key, and stores them in Secrets Manager `demo-kit/web/<demo>/acxd`.
+   **Never put these keys in the repo, an issue or a chat.** They come from the ACXD app's Deploy tab or Settings / Access.
+3. **Workflow copy.** `.github/workflows/demo.yml` must be identical to `demos/_kit/demo.workflow.yml`: after merging, run
+   `cp demos/_kit/demo.workflow.yml .github/workflows/demo.yml` and commit it (only a person with the `workflow` permission can push that folder).
+   `deploy` already runs the web step without it; the `web <demo>` command and the PR check of the kit's web tests need the new copy.
+
+### Checklist for a new demo
+1. Copy a demo folder, adapt the code and data, and add a `web` block (without `acxd.application_id` at first).
+2. `demo: deploy <demo>`, then import the ACXD data requests, flow and app, and click Build & deploy.
+3. Add `web.acxd.application_id` to `demo.json` (PR) and run `set-acxd-keys.sh <demo>`.
+4. `demo: deploy <demo>` again: the chat flow is created, the chat is wired and the page is published. The comment shows the page URL.
+
+### Live Sync
+The page passes `liveSync: {deploymentKey, apiKey}` to Touchpoint when both keys are stored. For Live Sync to do anything the ACXD app needs a
+**Live Sync node** and the page needs actions (`web/actions.js`, using `touchpoint.sendContext({actions: [...]})`). A plain Generative Journey app
+works as a normal chat. Note that the keys end up in the public page (the ACXD Deploy snippet does the same), so use demo-only keys.
+
+### Security notes
+The pages are public to anyone with the link (not indexed). They contain no data of their own, and all demo data is synthetic. `start-chat`
+creates a Connect chat contact per visitor, so share the link only as widely as you are happy to pay for chats.
+`demo: delete <demo>` removes the page and the chat wiring but keeps the shared stack and the key secret.

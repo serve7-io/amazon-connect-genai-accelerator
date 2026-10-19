@@ -46,3 +46,9 @@ Model ids:
 3. "Koliko košta MT-07 od petka do ponedeljka?" (Serbian) The agent quotes with the 10 % discount.
 4. "Rezerviši, Milan Ilić, 064 123 4567, A kategorija" The agent shows a summary, the customer says yes, and gets YAM-xxxxx.
 5. "Can you cancel YAM-xxxxx? My phone is 064 123 4567"
+
+## Web test page
+This demo has a CloudFront test page with the Touchpoint chat (see `demos/_kit/README.md`, "Web test page"). The `web` block is in `demo.json`.
+- One-time: `bash demos/_kit/web/set-acxd-keys.sh yamaha-moto` in CloudShell (the app's Production deployment key, optional Live Sync API key).
+- Publish: `demo: deploy yamaha-moto` (creates the chat flow and the page) or `demo: web yamaha-moto` (page only). The page URL is in the result comment.
+- Yamaha motorcycle rental: the page is `https://<cloudfront domain>/yamaha-moto/`.
