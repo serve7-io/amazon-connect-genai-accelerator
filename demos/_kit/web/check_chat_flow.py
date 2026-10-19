@@ -7,6 +7,10 @@ Renders the demo's ChatFlow exactly as CloudFormation would (template + demo.jso
 Secrets Manager demo-kit/web/<demo>/acxd), then creates a throwaway flow "zz-check-<demo>" in the Connect instance and
 prints Connect's own problem list. A flow that gets created is deleted again. The deployment key is never printed
 (only its length and whether it contains spaces or quotes). --dry-run renders and checks the flow graph offline.
+
+It then bisects: the same flow is sent several times with one thing changed in the Agentic CX block (no context
+variables, other context variables, a literal alias, no alias, ...). The variants that Connect accepts show which
+part of the block it objects to.
 """
 import json
 import re
@@ -63,22 +67,44 @@ def main():
         print("dry run: nothing sent to Connect")
         return
     connect = boto3.client("connect", region_name=cfg["region"])
-    name = f"zz-check-{demo}"
-    try:
-        r = connect.create_contact_flow(InstanceId=web["connect_instance_id"], Name=name, Type="CONTACT_FLOW", Content=flow)
-    except Exception as e:  # noqa: BLE001 - we want Connect's whole answer
-        resp = getattr(e, "response", {}) or {}
-        print("CONNECT REJECTED THE FLOW")
-        print(" error  :", resp.get("Error", {}))
-        for k, v in resp.items():
-            if k not in ("Error", "ResponseMetadata"):
-                print(f" {k}:", json.dumps(v))
-        if not resp:
-            print(" ", repr(e))
-        sys.exit(1)
-    print("Connect ACCEPTED the flow, so the flow itself is valid. Deleting the throwaway copy.")
-    connect.delete_contact_flow(InstanceId=web["connect_instance_id"], ContactFlowId=r["ContactFlowId"])
-    print("deleted", r["ContactFlowId"])
+    instance = web["connect_instance_id"]
+    base = json.loads(flow)
+    agent_idx = next(i for i, a in enumerate(base["Actions"]) if a["Type"] == "ConnectParticipantWithAgenticCX")
+
+    def variant(mutate):
+        doc = json.loads(json.dumps(base))
+        mutate(doc["Actions"][agent_idx]["Parameters"]["AgentConfiguration"])
+        return json.dumps(doc)
+
+    def drop(k):
+        return lambda c: c.pop(k, None)
+
+    variants = [
+        ("as rendered (what CloudFormation sends)", lambda c: None),
+        ("without ContextVariables", drop("ContextVariables")),
+        ("ContextVariables without $.ContactId", lambda c: c.update(ContextVariables={"channel": "CHAT"})),
+        ("empty ContextVariables", lambda c: c.update(ContextVariables={})),
+        ("Alias set to the literal word Production", lambda c: c.update(Alias="Production")),
+        ("without Alias", drop("Alias")),
+        ("without Alias and ContextVariables", lambda c: (c.pop("Alias", None), c.pop("ContextVariables", None))),
+    ]
+    results = []
+    for n, (label, mutate) in enumerate(variants):
+        content = variant(mutate)
+        try:
+            r = connect.create_contact_flow(InstanceId=instance, Name=f"zz-check-{demo}-{n}", Type="CONTACT_FLOW", Content=content)
+        except Exception as e:  # noqa: BLE001 - we want Connect's whole answer
+            resp = getattr(e, "response", {}) or {}
+            problems = resp.get("problems") or resp.get("Problems") or resp.get("Error", {}).get("Message") or repr(e)
+            results.append((label, "REJECTED", json.dumps(problems)))
+            continue
+        connect.delete_contact_flow(InstanceId=instance, ContactFlowId=r["ContactFlowId"])
+        results.append((label, "ACCEPTED", "(throwaway flow deleted)"))
+    print()
+    for label, verdict, detail in results:
+        print(f"{verdict:9} {label}\n          {detail}")
+    print()
+    print("Send me this whole output. ACCEPTED lines show which change makes Connect happy.")
 
 
 if __name__ == "__main__":
