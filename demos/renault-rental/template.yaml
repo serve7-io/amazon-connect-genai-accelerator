@@ -11,6 +11,28 @@ Parameters:
   ApiKeySecretArn:
     Type: String
     Description: Secrets Manager secret (plain string) used as x-api-key. Shared by all kit demos.
+  ConnectInstanceId:
+    Type: String
+    Default: ""
+    Description: Connect instance id for the web chat flow (demo.json web.connect_instance_id). Empty = no chat flow.
+  AcxdWorkspaceId:
+    Type: String
+    Default: ""
+  AcxdApplicationId:
+    Type: String
+    Default: ""
+  AcxdAlias:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Production deployment key of the ACXD app (Secrets Manager demo-kit/web/<demo>/acxd). Empty = no chat flow.
+
+Conditions:
+  HasChat: !And
+    - !Not [!Equals [!Ref ConnectInstanceId, ""]]
+    - !Not [!Equals [!Ref AcxdWorkspaceId, ""]]
+    - !Not [!Equals [!Ref AcxdApplicationId, ""]]
+    - !Not [!Equals [!Ref AcxdAlias, ""]]
 
 Resources:
   FleetTable:
@@ -79,6 +101,46 @@ Resources:
       Principal: "*"
       InvokedViaFunctionUrl: true
 
+  # ---------- Web chat: Connect chat flow that hands the contact to the ACXD app (used by the CloudFront test page) ----------
+  ChatFlow:
+    Type: AWS::Connect::ContactFlow
+    Condition: HasChat
+    Properties:
+      InstanceArn: !Sub "arn:${AWS::Partition}:connect:${AWS::Region}:${AWS::AccountId}:instance/${ConnectInstanceId}"
+      Name: !Sub "${AWS::StackName}-chat"
+      Type: CONTACT_FLOW
+      Description: Web chat for the demo test page. Hands the chat to the ACXD application and ends it when the application finishes.
+      Content: !Sub |
+        {
+          "Version": "2019-10-30",
+          "StartAction": "log",
+          "Actions": [
+            {"Identifier": "log", "Type": "UpdateFlowLoggingBehavior",
+             "Parameters": {"FlowLoggingBehavior": "Enabled"}, "Transitions": {"NextAction": "agent"}},
+            {"Identifier": "agent", "Type": "ConnectParticipantWithAgenticCX",
+             "Parameters": {"AgentConfiguration": {"WorkspaceId": "${AcxdWorkspaceId}", "ApplicationId": "${AcxdApplicationId}",
+               "Alias": "${AcxdAlias}", "ContextVariables": {"contact_id": "$.ContactId", "channel": "CHAT"}}},
+             "Transitions": {"NextAction": "bye-msg",
+               "Errors": [{"NextAction": "error-msg", "ErrorType": "NoMatchingError"},
+                          {"NextAction": "bye-msg", "ErrorType": "NoMatchingCondition"},
+                          {"NextAction": "idle-msg", "ErrorType": "InputTimeLimitExceeded"}],
+               "Conditions": [{"NextAction": "team-msg", "Condition": {"Operator": "Equals", "Operands": ["Escalation"]}}]}},
+            {"Identifier": "error-msg", "Type": "MessageParticipant",
+             "Parameters": {"Text": "Sorry, something went wrong on our side. Please try again in a moment."},
+             "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "idle-msg", "Type": "MessageParticipant",
+             "Parameters": {"Text": "I haven't heard from you, so I'll close this chat for now. Start a new chat any time."},
+             "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "team-msg", "Type": "MessageParticipant",
+             "Parameters": {"Text": "A team member is not available in this demo. Thanks for chatting."},
+             "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "bye-msg", "Type": "MessageParticipant",
+             "Parameters": {"Text": "Thanks for chatting. Goodbye."},
+             "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "bye", "Type": "DisconnectParticipant", "Parameters": {}, "Transitions": {}}
+          ]
+        }
+
 Outputs:
   AcxdApiUrl:
     Value: !GetAtt ApiFunctionUrl.FunctionUrl
@@ -88,3 +150,6 @@ Outputs:
     Value: !Ref ReservationsTable
   ApiFunctionName:
     Value: !Ref ApiFunction
+  ChatFlowId:
+    Condition: HasChat
+    Value: !Select [3, !Split ["/", !GetAtt ChatFlow.ContactFlowArn]]

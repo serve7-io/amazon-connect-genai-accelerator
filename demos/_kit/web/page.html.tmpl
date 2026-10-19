@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="__LANG__">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>__TITLE__</title>
+<style>
+  :root { --accent: __ACCENT__; --ink: #1d232b; --muted: #5b6672; --bg: #f6f7f9; --card: #fff; --line: #e3e6ea; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #eef1f4; --muted: #a3adb8; --bg: #14181d; --card: #1d232b; --line: #2d3641; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--ink); background: var(--bg); }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 24px; background: var(--card); border-bottom: 4px solid var(--accent); }
+  header b { font-size: 18px; }
+  .badge { margin-left: auto; font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  main { max-width: 860px; margin: 32px auto; padding: 0 24px; }
+  h1 { font-size: 28px; margin: 0 0 8px; }
+  p.lead { color: var(--muted); margin: 0 0 24px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px 24px; margin-bottom: 20px; }
+  .card h2 { font-size: 16px; margin: 0 0 10px; }
+  ul.prompts { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  ul.prompts li { border: 1px solid var(--accent); border-radius: 999px; padding: 6px 14px; font-size: 14px; }
+  #status { border-left: 4px solid #c97a00; }
+  footer { max-width: 860px; margin: 0 auto 40px; padding: 0 24px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header><b>__BRAND__</b><span class="badge">DEMO - synthetic data</span></header>
+<main>
+  <h1>__TITLE__</h1>
+  <p class="lead">__BLURB__</p>
+  <div class="card" id="status" hidden>
+    <h2>Chat is not available yet</h2>
+    <p>The chat for this demo has not been connected yet (or it could not load). Try again in a minute, or ask the demo owner.</p>
+  </div>
+  <div class="card">
+    <h2>Try asking</h2>
+    <ul class="prompts">__PROMPTS__</ul>
+  </div>
+  <div class="card">
+    <h2>About this page</h2>
+    <p>This is a Serve7 demo test page. It talks to the same assistant as the ACXD test panel, through Amazon Connect chat.
+       All data shown or booked here is invented.</p>
+  </div>
+</main>
+<footer>Serve7 demo kit &middot; not indexed by search engines</footer>
+<script src="https://cdn.jsdelivr.net/npm/@amazon-connect-touchpoint/web@__TP_VERSION__/lib/index.umd.js"
+        integrity="__TP_SRI__" crossorigin="anonymous"></script>
+<script>
+(async () => {
+  const CFG = __CONFIG__;
+  const fail = () => { document.getElementById("status").hidden = false; };
+  if (!CFG.chatReady || typeof amazonConnectTouchpoint === "undefined") { fail(); return; }
+  const options = {
+    config: {
+      chatEndpoint: location.origin + "/" + CFG.demo + "/start-chat",
+      instanceId: CFG.instanceId,
+      contactFlowId: "set-server-side",   // the real flow is fixed server-side; the browser value is ignored
+      region: CFG.region,
+      participantDisplayName: CFG.displayName
+    },
+    input: "text",
+    windowSize: "floating",
+    languageCode: CFG.language,
+    showParticipantInfo: true,
+    assistantName: CFG.assistantName,
+    userMessageBubble: true,
+    agentMessageBubble: true,
+    theme: { accent: CFG.accent }
+  };
+  if (CFG.liveSync) { options.liveSync = CFG.liveSync; }
+  const touchpoint = await amazonConnectTouchpoint.create(options);
+__ACTIONS__
+})().catch((e) => { console.error(e); document.getElementById("status").hidden = false; });
+</script>
+</body>
+</html>
