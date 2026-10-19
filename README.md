@@ -50,7 +50,7 @@ Anthropic models need the one-time use-case form in the Bedrock console; Amazon 
 | `validate.yml` | every push / PR | none | fmt, validate, cfn-lint, tenant-folder check, unit tests (gateway, agent tools, Phase 1 tools), flow-graph check, Checkov (report only) |
 | `plan.yml` | PR touching infra | `serve7-plan` (read-only, OIDC) | plans every layer, comments the summary on the PR |
 | `deploy.yml` | merge to `main` / manual | `serve7-deploy` (OIDC, GitHub environment `<tenant>-<env>`) | applies all layers, syncs knowledge, runs smoke tests |
-| `demo.yml` | issue titled `demo: <command> <demo> [args]` / manual / PR touching `demos/**` | demo CI role | deploy, delete, status, seed, reset, test and admin commands for the demos under `demos/` |
+| `demo.yml` | issue titled `demo: <command> <demo> [args]` / manual / PR touching `demos/**` | demo CI role | deploy, delete, status, seed, reset, test, web (CloudFront test page) and admin commands for the demos under `demos/` |
 | `ccg-s5.yml` | issue titled `ccg-s5: <command>` / manual / PR or push touching `demos/ccg-s5/**` | demo CI role | tests, deploy and day-to-day operations for the CCG Scenario 5 demo |
 
 One-time GitHub setup: create environment `sandbox-dev` (Settings → Environments); add required reviewers for `*-prod`.
@@ -92,7 +92,7 @@ through GitHub issues or Actions (`demo.yml`, `ccg-s5.yml`), not through the ten
 
 | Demo | What |
 |---|---|
-| `demos/_kit` | Shared kit: deploy / delete / smoke scripts, seed + data-request helpers, and the layout every demo follows |
+| `demos/_kit` | Shared kit: deploy / delete / smoke scripts, seed + data-request helpers, the CloudFront web test pages (`web/`), and the layout every demo follows |
 | `demos/yamaha-moto` | ACXD chat agent for a motorcycle rental (fleet, availability, quotes, bookings) |
 | `demos/renault-rental` | ACXD chat agent for a car rental (fleet, availability, quotes, bookings, category B licence check) |
 | `demos/ccg-s1` | Persistent cross-channel roadside assistance (AI chat -> live chat -> voice) |
