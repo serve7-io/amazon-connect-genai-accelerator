@@ -4,6 +4,7 @@ name: demo
 #   deploy <demo>                 create/update the stack, seed empty tables, smoke test, print ACXD URLs
 #   delete <demo>                 remove the stack + data (issue body must contain: confirm delete <demo>)
 #   status <demo> | seed <demo> | reset <demo> | test <demo>
+#   web <demo>                    re-publish the demo's web test page only (CloudFront + Touchpoint chat)
 #   <admin command> <demo> [args] from demos/<demo>/admin.py, e.g. "demo: set-price yamaha-moto mt07 70"
 # The output is posted as a comment and the issue is closed.
 on:
@@ -49,6 +50,12 @@ jobs:
             cfn-lint "$d/template.yaml"
           done
           for f in demos/_kit/*.sh; do bash -n "$f"; done
+      - name: Kit web test pages (start-chat Lambda, page renderer, shared CloudFront stack)
+        run: |
+          set -e
+          python -m pytest -q demos/_kit/tests
+          cfn-lint demos/_kit/web/stack.yaml
+          for f in demos/_kit/web/*.sh; do bash -n "$f"; done
 
   ops:
     if: >-
@@ -115,6 +122,7 @@ jobs:
             case "$CMD" in
               test)   python -m pytest -q "demos/$DEMO/tests" && cfn-lint "demos/$DEMO/template.yaml" && echo "lint OK" ;;
               deploy) bash demos/_kit/deploy.sh "$DEMO" ;;
+              web)    bash demos/_kit/deploy-web.sh "$DEMO" ;;
               delete) CONFIRM="$DEMO" bash demos/_kit/delete.sh "$DEMO" ;;
               *)      python3 demos/_kit/data.py "$DEMO" "$CMD" $ARGS ;;
             esac
