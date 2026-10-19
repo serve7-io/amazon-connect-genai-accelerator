@@ -8,9 +8,9 @@ Secrets Manager demo-kit/web/<demo>/acxd), then creates a throwaway flow "zz-che
 prints Connect's own problem list. A flow that gets created is deleted again. The deployment key is never printed
 (only its length and whether it contains spaces or quotes). --dry-run renders and checks the flow graph offline.
 
-It then bisects: the same flow is sent several times with one thing changed in the Agentic CX block (no context
-variables, other context variables, a literal alias, no alias, ...). The variants that Connect accepts show which
-part of the block it objects to.
+It then bisects: the same flow is sent several times with one thing changed in the Agentic CX block (context
+variables, the extra SpeechRecognition / AudioFiller parameters that the working voice flow has, ...). The variants that
+Connect accepts show which part of the block it objects to.
 """
 import json
 import re
@@ -73,20 +73,35 @@ def main():
 
     def variant(mutate):
         doc = json.loads(json.dumps(base))
-        mutate(doc["Actions"][agent_idx]["Parameters"]["AgentConfiguration"])
+        mutate(doc["Actions"][agent_idx]["Parameters"])
         return json.dumps(doc)
 
-    def drop(k):
-        return lambda c: c.pop(k, None)
+    speech = {"SpeechRecognitionEngine": "AMAZON_AGENTIC_VOICE"}   # as in the working voice flow demos/ccg-s5/scripts/main-flow.sh
+    filler = {"Enabled": False}
 
+    def build(context, with_speech, with_filler):
+        def mutate(p):
+            cfg = p["AgentConfiguration"]
+            if context is None:
+                cfg.pop("ContextVariables", None)
+            else:
+                cfg["ContextVariables"] = context
+            if with_speech:
+                p["SpeechRecognitionConfiguration"] = speech
+            if with_filler:
+                p["AudioFillerConfiguration"] = filler
+        return mutate
+
+    iid = {"contact_id": "$.InitialContactId"}
     variants = [
-        ("as rendered (what CloudFormation sends)", lambda c: None),
-        ("without ContextVariables", drop("ContextVariables")),
-        ("ContextVariables without $.ContactId", lambda c: c.update(ContextVariables={"channel": "CHAT"})),
-        ("empty ContextVariables", lambda c: c.update(ContextVariables={})),
-        ("Alias set to the literal word Production", lambda c: c.update(Alias="Production")),
-        ("without Alias", drop("Alias")),
-        ("without Alias and ContextVariables", lambda c: (c.pop("Alias", None), c.pop("ContextVariables", None))),
+        ("control: as rendered (what CloudFormation sends)", lambda p: None),
+        ("InitialContactId + Speech + AudioFiller (like the working voice flow)", build(iid, True, True)),
+        ("InitialContactId + AudioFiller only", build(iid, False, True)),
+        ("InitialContactId + Speech only", build(iid, True, False)),
+        ("InitialContactId only, no extra parameters", build(iid, False, False)),
+        ("InitialContactId + channel CHAT + Speech + AudioFiller", build({**iid, "channel": "CHAT"}, True, True)),
+        ("no ContextVariables + Speech + AudioFiller", build(None, True, True)),
+        ("old ContextVariables ($.ContactId) + Speech + AudioFiller", build({"contact_id": "$.ContactId", "channel": "CHAT"}, True, True)),
     ]
     results = []
     for n, (label, mutate) in enumerate(variants):
