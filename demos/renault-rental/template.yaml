@@ -146,6 +146,54 @@ Resources:
           ]
         }
 
+  # ---------- Web voice: the same ACXD app over an in-browser WebRTC call (Touchpoint Voice mini, "Talk" on the page) ----------
+  VoiceFlow:
+    Type: AWS::Connect::ContactFlow
+    Condition: HasChat
+    Properties:
+      InstanceArn: !Sub "arn:${AWS::Partition}:connect:${AWS::Region}:${AWS::AccountId}:instance/${ConnectInstanceId}"
+      Name: !Sub "${AWS::StackName}-voice"
+      Type: CONTACT_FLOW
+      Description: Web voice for the demo test page. Hands the call to the ACXD application and ends it when the application finishes.
+      Content: !Sub |
+        {
+          "Version": "2019-10-30",
+          "StartAction": "log",
+          "Actions": [
+            {"Identifier": "log", "Type": "UpdateFlowLoggingBehavior",
+             "Parameters": {"FlowLoggingBehavior": "Enabled"}, "Transitions": {"NextAction": "voice"}},
+            {"Identifier": "voice", "Type": "UpdateContactTextToSpeechVoice",
+             "Parameters": {"TextToSpeechVoice": "Joanna"},
+             "Transitions": {"NextAction": "greet", "Errors": [{"NextAction": "greet", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "greet", "Type": "MessageParticipant",
+             "Parameters": {"Text": "Hi! I'm the Renault car rental assistant in Belgrade. How can I help?"},
+             "Transitions": {"NextAction": "agent", "Errors": [{"NextAction": "agent", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "agent", "Type": "ConnectParticipantWithAgenticCX",
+             "Parameters": {"AgentConfiguration": {"WorkspaceId": "${AcxdWorkspaceId}", "ApplicationId": "${AcxdApplicationId}",
+               "Alias": "${AcxdAlias}", "ContextVariables": {"contact_id": "$.InitialContactId", "channel": "VOICE"}},
+               "SpeechRecognitionConfiguration": {"SpeechRecognitionEngine": "AMAZON_AGENTIC_VOICE"},
+               "AudioFillerConfiguration": {"Enabled": false}},
+             "Transitions": {"NextAction": "bye-msg",
+               "Errors": [{"NextAction": "error-msg", "ErrorType": "NoMatchingError"},
+                          {"NextAction": "bye-msg", "ErrorType": "NoMatchingCondition"},
+                          {"NextAction": "idle-msg", "ErrorType": "InputTimeLimitExceeded"}],
+               "Conditions": [{"NextAction": "team-msg", "Condition": {"Operator": "Equals", "Operands": ["Escalation"]}}]}},
+            {"Identifier": "error-msg", "Type": "MessageParticipant",
+             "Parameters": {"Text": "Sorry, something went wrong on our side. Please try again in a moment. Goodbye."},
+             "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "idle-msg", "Type": "MessageParticipant",
+             "Parameters": {"Text": "I didn't hear anything, so I'll end the call for now. You can start again any time. Goodbye."},
+             "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "team-msg", "Type": "MessageParticipant",
+             "Parameters": {"Text": "A team member is not available in this demo. Thanks for calling. Goodbye."},
+             "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "bye-msg", "Type": "MessageParticipant",
+             "Parameters": {"Text": "Thanks for calling. Goodbye."},
+             "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "bye", "Type": "DisconnectParticipant", "Parameters": {}, "Transitions": {}}
+          ]
+        }
+
 Outputs:
   AcxdApiUrl:
     Value: !GetAtt ApiFunctionUrl.FunctionUrl
@@ -158,3 +206,6 @@ Outputs:
   ChatFlowId:
     Condition: HasChat
     Value: !Select [3, !Split ["/", !GetAtt ChatFlow.ContactFlowArn]]
+  VoiceFlowId:
+    Condition: HasChat
+    Value: !Select [3, !Split ["/", !GetAtt VoiceFlow.ContactFlowArn]]
