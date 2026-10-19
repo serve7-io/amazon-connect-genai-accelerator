@@ -26,4 +26,5 @@ if [ -n "$WEB_BUCKET" ] && [ "$WEB_BUCKET" != "None" ]; then
   aws s3 rm "s3://$WEB_BUCKET/$NAME/" --recursive --quiet 2>/dev/null && echo "web page removed" || true
 fi
 aws ssm delete-parameter --name "/demo-kit/web/$NAME/chat" >/dev/null 2>&1 && echo "chat wiring removed" || true
+aws ssm delete-parameter --name "/demo-kit/web/$NAME/voice" >/dev/null 2>&1 && echo "voice wiring removed" || true
 echo "Done. Kept by design: shared bucket and API key secret. Remove the ACXD application in ACXD."
