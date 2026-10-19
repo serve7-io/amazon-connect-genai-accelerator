@@ -10,6 +10,7 @@ Environment (set by deploy-web.sh, never written to the repo):
                      The page only gets a Live Sync block when both values are present. These are browser-side keys by
                      design (the ACXD Deploy tab puts them in the page), so anyone who opens the page can read them.
     WEB_CHAT_READY   "1" when the demo's chat flow exists and is wired; otherwise the page shows "chat not available".
+    WEB_VOICE_READY  "1" when the demo's voice flow exists and is wired; the page then offers a Chat / Talk toggle.
 
 Optional per-demo files (trusted repo content, inserted as is):
     demos/<demo>/web/actions.js   after Touchpoint starts; can use the variable `touchpoint` and `await`
@@ -73,6 +74,7 @@ def render(name, env=None):
         "language": web.get("language", "en-US"),
         "accent": web.get("accent", "#0b6bcb"),
         "chatReady": env.get("WEB_CHAT_READY") == "1" and bool(web.get("connect_instance_id")),
+        "voiceReady": env.get("WEB_VOICE_READY") == "1" and bool(web.get("connect_instance_id")),
         "liveSync": live,
     }
     def extra(name):

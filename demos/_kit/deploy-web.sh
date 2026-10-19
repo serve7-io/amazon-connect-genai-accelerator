@@ -3,7 +3,8 @@
 # Needs a "web" block in demos/<demo>/demo.json. Safe to re-run. Run by deploy.sh (step 6) and by the "web" command:
 #   issue title  "demo: web <demo>"  re-publishes the page only.
 # Creates/updates the shared stack demo-kit-web once (S3 + CloudFront + start-chat Lambda, first run takes ~5-10 min),
-# writes /demo-kit/web/<demo>/chat to SSM, renders the page and uploads it to s3://<web bucket>/<demo>/index.html.
+# writes /demo-kit/web/<demo>/chat (and /voice when the demo has a VoiceFlowId output) to SSM, renders the page and
+# uploads it to s3://<web bucket>/<demo>/index.html.
 # Secrets: the demo's ACXD browser keys are read from Secrets Manager demo-kit/web/<demo>/acxd (see web/set-acxd-keys.sh)
 # and only end up in the rendered page (browser-side keys by design). They are never printed.
 set -euo pipefail
@@ -59,12 +60,21 @@ else
   echo "no chat flow yet: it needs web.acxd ids in demo.json and the key secret demo-kit/web/$NAME/acxd"
   echo "(create it once in CloudShell: bash demos/_kit/web/set-acxd-keys.sh $NAME), then deploy again. The page says 'chat not available' until then."
 fi
+VOICE_FLOW_ID=$(out_of "$STACK" VoiceFlowId); [ "$VOICE_FLOW_ID" = "None" ] && VOICE_FLOW_ID=""
+VOICE_READY=0
+if [ -n "$VOICE_FLOW_ID" ] && [ -n "$INSTANCE_ID" ]; then
+  VALUE=$(python3 -c "import json,sys;print(json.dumps({'instance_id':sys.argv[1],'flow_id':sys.argv[2]}))" "$INSTANCE_ID" "$VOICE_FLOW_ID")
+  aws ssm put-parameter --name "/demo-kit/web/$NAME/voice" --type String --overwrite --value "$VALUE" >/dev/null
+  VOICE_READY=1; echo "voice flow wired (flow $VOICE_FLOW_ID)"
+else
+  echo "no voice flow for this demo (the page has no Talk mode)"
+fi
 
 say "3/4 Render and upload the page"
 KEYS=$(aws secretsmanager get-secret-value --secret-id "demo-kit/web/$NAME/acxd" --query SecretString --output text 2>/dev/null || true)
 [ "$KEYS" = "None" ] && KEYS=""
 PAGE=$(mktemp -d)
-ACXD_KEYS_JSON="$KEYS" WEB_CHAT_READY="$CHAT_READY" python3 "$WEB/render.py" "$NAME" --out "$PAGE"
+ACXD_KEYS_JSON="$KEYS" WEB_CHAT_READY="$CHAT_READY" WEB_VOICE_READY="$VOICE_READY" python3 "$WEB/render.py" "$NAME" --out "$PAGE"
 aws s3 cp --quiet "$PAGE/index.html" "s3://$BUCKET/$NAME/index.html" --content-type "text/html; charset=utf-8" --cache-control "no-store"
 printf 'User-agent: *\nDisallow: /\n' | aws s3 cp --quiet - "s3://$BUCKET/robots.txt" --content-type text/plain
 

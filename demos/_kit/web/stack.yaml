@@ -1,8 +1,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   Serve7 demo kit - shared web test pages. One private S3 bucket behind one CloudFront distribution (HTTPS, noindex),
-  one folder per demo (/<demo>/), plus a small start-chat endpoint on the same domain (/<demo>/start-chat) that the
-  Amazon Connect Touchpoint web chat calls. Synthetic data only. Deployed by demos/_kit/deploy-web.sh.
+  one folder per demo (/<demo>/), plus a small start-chat / start-voice endpoint on the same domain (/<demo>/start-chat,
+  /<demo>/start-voice) that the Amazon Connect Touchpoint web chat and voice call. Synthetic data only. Deployed by
+  demos/_kit/deploy-web.sh.
 
 Parameters:
   CodeBucket:
@@ -130,6 +131,13 @@ Resources:
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad     # Managed-CachingDisabled
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac   # Managed-AllViewerExceptHostHeader
             ResponseHeadersPolicyId: !Ref HeadersPolicy
+          - PathPattern: "/*/start-voice"
+            TargetOriginId: start-chat
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad     # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac   # Managed-AllViewerExceptHostHeader
+            ResponseHeadersPolicyId: !Ref HeadersPolicy
 
   # ---------- start-chat endpoint (browser-facing, locked down in code) ----------
   StartChatRole:
@@ -145,8 +153,10 @@ Resources:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action: connect:StartChatContact
-                Resource: !Sub "arn:${AWS::Partition}:connect:${AWS::Region}:${AWS::AccountId}:instance/*/contact-flow/*"
+                Action: [connect:StartChatContact, connect:StartWebRTCContact]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:connect:${AWS::Region}:${AWS::AccountId}:instance/*/contact-flow/*"
+                  - !Sub "arn:${AWS::Partition}:connect:${AWS::Region}:${AWS::AccountId}:instance/*"
               - Effect: Allow
                 Action: ssm:GetParameter
                 Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/demo-kit/web/*"
