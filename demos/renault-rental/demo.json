@@ -1,0 +1,21 @@
+{
+  "name": "renault-rental",
+  "title": "Renault car rental chat agent (Belgrade, EUR)",
+  "stack": "demo-renault-rental",
+  "region": "ca-central-1",
+  "lambda_dir": "lambdas/api",
+  "seed": "data/seed.json",
+  "acxd_secret": "ccg_s5_api_key",
+  "status_tables": [
+    "FleetTable",
+    "ReservationsTable"
+  ],
+  "tags": {
+    "serve7:project": "demo",
+    "serve7:demo": "renault-rental",
+    "serve7:data-classification": "synthetic"
+  },
+  "smoke": {
+    "op": "list_cars"
+  }
+}

@@ -94,6 +94,7 @@ through GitHub issues or Actions (`demo.yml`, `ccg-s5.yml`), not through the ten
 |---|---|
 | `demos/_kit` | Shared kit: deploy / delete / smoke scripts, seed + data-request helpers, and the layout every demo follows |
 | `demos/yamaha-moto` | ACXD chat agent for a motorcycle rental (fleet, availability, quotes, bookings) |
+| `demos/renault-rental` | ACXD chat agent for a car rental (fleet, availability, quotes, bookings, category B licence check) |
 | `demos/ccg-s1` | Persistent cross-channel roadside assistance (AI chat -> live chat -> voice) |
 | `demos/ccg-s5` | Secure renewal payment over voice with a simulated PCI partner hand-over |
 
