@@ -68,7 +68,9 @@ def seed(d, cfg, reset=False):
         if existing and not reset:
             print(f"{out_name}: {len(existing)} rows already - kept (use reset to reload)")
             continue
-        with t.batch_writer() as bw:
+        # overwrite_by_pkeys: a seed row that has the same key as an existing row replaces its delete in the batch;
+        # DynamoDB rejects a BatchWriteItem that holds two requests for one key
+        with t.batch_writer(overwrite_by_pkeys=keys) as bw:
             for it in existing:
                 bw.delete_item(Key={k: it[k] for k in keys})
             for r in rows:
