@@ -17,5 +17,25 @@
   },
   "smoke": {
     "op": "list_cars"
+  },
+  "web": {
+    "title": "Renault car rental, Belgrade",
+    "brand": "Renault Rent D.O.O.",
+    "assistant_name": "Renault Rent assistant",
+    "blurb": "Ask about cars, prices and availability, or book a car. This is a demo with invented data.",
+    "accent": "#f2b705",
+    "language": "en-US",
+    "display_name": "Customer",
+    "prompts": [
+      "Hi, I need a car for 7 people next week",
+      "Is the Scenic free this weekend?",
+      "I only have an A2 licence, can I rent a Clio?",
+      "Koliko košta Clio od petka do ponedeljka?"
+    ],
+    "connect_instance_id": "78261fe2-310c-4f82-8437-4239487463ac",
+    "acxd": {
+      "workspace_id": "f2e8e16b-df1e-4177-a3d8-42b833becf81",
+      "application_id": "bdcc4f87-1273-4499-bd10-522b06dd048f"
+    }
   }
 }
