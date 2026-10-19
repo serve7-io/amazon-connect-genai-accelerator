@@ -34,9 +34,16 @@ if [[ "$STATUS" == "ROLLBACK_COMPLETE" ]]; then
   echo "removing failed first attempt"; aws cloudformation delete-stack --stack-name "$WEB_STACK"
   aws cloudformation wait stack-delete-complete --stack-name "$WEB_STACK"
 fi
-aws cloudformation deploy --stack-name "$WEB_STACK" --template-file "$WEB/stack.yaml" --capabilities CAPABILITY_IAM \
+if ! aws cloudformation deploy --stack-name "$WEB_STACK" --template-file "$WEB/stack.yaml" --capabilities CAPABILITY_IAM \
   --no-fail-on-empty-changeset --tags serve7:project=demo serve7:demo=kit-web serve7:data-classification=synthetic \
-  --parameter-overrides CodeBucket="$CODE_BUCKET" CodeKey="$KEY"
+  --parameter-overrides CodeBucket="$CODE_BUCKET" CodeKey="$KEY"; then
+  echo "---- CloudFormation reports these failed resources in $WEB_STACK:"
+  aws cloudformation describe-stack-events --stack-name "$WEB_STACK" \
+    --query "StackEvents[?contains(ResourceStatus,'FAILED')].[LogicalResourceId,ResourceStatusReason]" --output text 2>&1 \
+    | cut -c1-400 | head -20 || true
+  echo "(fix the cause, then run: demo: web $NAME)"
+  exit 1
+fi
 WEB_URL=$(out_of "$WEB_STACK" WebUrl); BUCKET=$(out_of "$WEB_STACK" WebBucketName)
 [ -n "$WEB_URL" ] && [ -n "$BUCKET" ] || { echo "shared web stack has no outputs"; exit 1; }
 

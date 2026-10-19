@@ -208,6 +208,12 @@ def test_chat_flow_in_template(demo):
     agent = next(a for a in doc["Actions"] if a["Type"] == "ConnectParticipantWithAgenticCX")["Parameters"]["AgentConfiguration"]
     assert agent["WorkspaceId"] == "ws" and agent["ApplicationId"] == "app" and agent["Alias"] == "key"
     assert agent["ContextVariables"]["channel"] == "CHAT"
+    assert agent["ContextVariables"]["contact_id"] == "$.InitialContactId"      # same reference as the working voice flow
+    params = next(a for a in doc["Actions"] if a["Type"] == "ConnectParticipantWithAgenticCX")["Parameters"]
+    # Connect rejects the block (InvalidContactFlowException, Actions[n].Parameters) without SpeechRecognitionConfiguration,
+    # even in a chat flow; checked against the real Connect instance on 2026-10-19 with demos/_kit/web/check_chat_flow.py
+    assert params["SpeechRecognitionConfiguration"] == {"SpeechRecognitionEngine": "AMAZON_AGENTIC_VOICE"}
+    assert params["AudioFillerConfiguration"] == {"Enabled": False}
 
 
 def test_shared_stack_keeps_pages_private_and_unindexed():
