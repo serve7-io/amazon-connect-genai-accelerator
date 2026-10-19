@@ -11,8 +11,11 @@ Environment (set by deploy-web.sh, never written to the repo):
                      design (the ACXD Deploy tab puts them in the page), so anyone who opens the page can read them.
     WEB_CHAT_READY   "1" when the demo's chat flow exists and is wired; otherwise the page shows "chat not available".
 
-Optional per-demo file demos/<demo>/web/actions.js is inserted after Touchpoint starts; it can use the variable
-`touchpoint` (for example touchpoint.sendContext({actions: [...]}) for Live Sync).
+Optional per-demo files (trusted repo content, inserted as is):
+    demos/<demo>/web/actions.js   after Touchpoint starts; can use the variable `touchpoint` and `await`
+                                  (for example touchpoint.sendContext({actions: [...]}) for Live Sync)
+    demos/<demo>/web/body.html    extra page content, shown above the "Try asking" card
+    demos/<demo>/web/extra.css    extra styles (the page defines --accent, --ink, --muted, --bg, --card, --line)
 """
 import argparse
 import html
@@ -72,8 +75,11 @@ def render(name, env=None):
         "chatReady": env.get("WEB_CHAT_READY") == "1" and bool(web.get("connect_instance_id")),
         "liveSync": live,
     }
-    actions_file = d / "web" / "actions.js"
-    actions = actions_file.read_text(encoding="utf-8") if actions_file.is_file() else ""
+    def extra(name):
+        f = d / "web" / name
+        return f.read_text(encoding="utf-8") if f.is_file() else ""
+
+    actions, extra_body, extra_css = extra("actions.js"), extra("body.html"), extra("extra.css")
     prompts = "".join(f"<li>{html.escape(p)}</li>" for p in web.get("prompts", []))
     tmpl = (Path(__file__).resolve().parent / "page.html.tmpl").read_text(encoding="utf-8")
     values = {
@@ -87,6 +93,8 @@ def render(name, env=None):
         "__TP_SRI__": TP_SRI,
         "__CONFIG__": _js(page_cfg),
         "__ACTIONS__": actions,
+        "__EXTRA_BODY__": extra_body,
+        "__EXTRA_CSS__": extra_css,
     }
     # one pass over the template: substituted text is never scanned again, so a title or blurb cannot inject a token
     return re.sub(r"__[A-Z_]+__", lambda m: values.get(m.group(0), m.group(0)), tmpl)
