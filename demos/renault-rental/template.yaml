@@ -116,7 +116,10 @@ Resources:
           "StartAction": "log",
           "Actions": [
             {"Identifier": "log", "Type": "UpdateFlowLoggingBehavior",
-             "Parameters": {"FlowLoggingBehavior": "Enabled"}, "Transitions": {"NextAction": "agent"}},
+             "Parameters": {"FlowLoggingBehavior": "Enabled"}, "Transitions": {"NextAction": "greet"}},
+            {"Identifier": "greet", "Type": "MessageParticipant",
+             "Parameters": {"Text": "Zdravo! Ja sam asistent za iznajmljivanje automobila Renault u Beogradu. Hi! I'm the Renault car rental assistant in Belgrade. Kako mogu da pomognem? / How can I help?"},
+             "Transitions": {"NextAction": "agent", "Errors": [{"NextAction": "agent", "ErrorType": "NoMatchingError"}]}},
             {"Identifier": "agent", "Type": "ConnectParticipantWithAgenticCX",
              "Parameters": {"AgentConfiguration": {"WorkspaceId": "${AcxdWorkspaceId}", "ApplicationId": "${AcxdApplicationId}",
                "Alias": "${AcxdAlias}", "ContextVariables": {"contact_id": "$.InitialContactId", "channel": "CHAT"}},
