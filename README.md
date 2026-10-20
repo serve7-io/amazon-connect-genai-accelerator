@@ -52,6 +52,7 @@ Anthropic models need the one-time use-case form in the Bedrock console; Amazon 
 | `deploy.yml` | merge to `main` / manual | `serve7-deploy` (OIDC, GitHub environment `<tenant>-<env>`) | applies all layers, syncs knowledge, runs smoke tests |
 | `demo.yml` | issue titled `demo: <command> <demo> [args]` / manual / PR touching `demos/**` | demo CI role | deploy, delete, status, seed, reset, test, web (CloudFront test page) and admin commands for the demos under `demos/` |
 | `ccg-s5.yml` | issue titled `ccg-s5: <command>` / manual / PR or push touching `demos/ccg-s5/**` | demo CI role | tests, deploy and day-to-day operations for the CCG Scenario 5 demo |
+| `auto-ship.yml` | push of a branch named `auto/**` by the owner | `GITHUB_TOKEN` only (the deploy itself runs in `demo.yml`) | merges the branch into `main` when it only touches `demos/` (not `ccg-s5`), `docs/` or `README.md` and all demo/kit checks pass, deletes the branch, then dispatches `demo.yml deploy <demo>` for changed demos in `AUTO_DEPLOY`; anything else gets a review PR |
 
 One-time GitHub setup: create environment `sandbox-dev` (Settings → Environments); add required reviewers for `*-prod`.
 The OIDC trust in `bootstrap.yaml` only accepts that environment for deploys.

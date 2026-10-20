@@ -16,7 +16,7 @@ ACTIONS = (ROOT / "web" / "actions.js").read_text(encoding="utf-8")
 BODY = (ROOT / "web" / "body.html").read_text(encoding="utf-8")
 FLOW = json.loads((ROOT / "acxd" / "renaultlivesync.flow.json").read_text(encoding="utf-8"))
 SEED = json.loads((ROOT / "data" / "seed.json").read_text(encoding="utf-8"))
-ACTION_NAMES = {"highlight_cars", "set_booking_details", "show_quote", "show_confirmation"}
+ACTION_NAMES = {"highlight_cars", "set_booking_details", "show_quote", "show_confirmation", "show_cancellation"}
 
 
 def _load(name, path):
@@ -70,6 +70,7 @@ def test_handlers_never_use_innerhtml():
 def test_flow_is_a_live_sync_flow_with_the_rental_tools():
     ls = _ls_node()
     assert ls["type"] == "agentic" and ls["temperature"] == 0.2
+    assert ls["modelType"] == "anthropic.claude-sonnet-5"      # checked against what ACXD saved on 2026-10-19
     assert [t["dataRequest"]["dataRequestId"] for t in ls["tools"]] == [
         "rnlistcars", "rncheckavailability", "rnquote", "rncreatereservation", "rngetreservation", "rncancelreservation"]
     ids = set(FLOW["nodes"])
@@ -132,3 +133,15 @@ def test_connect_chat_flow_greets_before_handing_over_to_the_live_sync_agent():
         step = actions[step]["Transitions"]["NextAction"]
     greet = [actions[i] for i in seen if actions[i]["Type"] == "MessageParticipant"]
     assert greet and "Zdravo!" in greet[0]["Parameters"]["Text"] and "How can I help?" in greet[0]["Parameters"]["Text"]
+
+
+def test_cancelling_changes_the_confirmation_panel_and_a_new_booking_restores_it():
+    assert "show_cancellation" in _ls_node()["prompt"] and "call show_cancellation" in _ls_node()["prompt"]
+    css = (ROOT / "web" / "extra.css").read_text(encoding="utf-8")
+    assert ".panel.cancelled" in css
+    cancel = ACTIONS.split('action: "show_cancellation"')[1]
+    assert "setCancelled(true)" in cancel
+    confirm = ACTIONS.split('action: "show_confirmation"')[1].split('action: "show_cancellation"')[0]
+    assert "setCancelled(false)" in confirm                    # a new booking must undo the cancelled look
+    helper = re.search(r"const setCancelled = .*?\n  \};", ACTIONS, re.S).group(0)
+    assert "Booking cancelled" in helper and "Booking confirmed" in helper and "hint" in helper
