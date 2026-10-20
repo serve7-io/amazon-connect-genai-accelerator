@@ -28,7 +28,7 @@ Parameters:
     Default: f2e8e16b-df1e-4177-a3d8-42b833becf81
   AcxdApplicationId:
     Type: String
-    Default: ""
+    Default: 9088c019-349f-4343-b662-6d9c70a168f6
     Description: ACXD app ccg-roadside-intake (empty = chat flow not created yet)
   AcxdAlias:
     Type: String
@@ -423,10 +423,15 @@ Resources:
                "Parameters": {"FlowLoggingBehavior": "Enabled"}, "Transitions": {"NextAction": "guide"}},
               {"Identifier": "guide", "Type": "UpdateContactEventHooks",
                "Parameters": {"EventHooks": {"DefaultAgentUI": "${GuideFlow.ContactFlowArn}"}},
+               "Transitions": {"NextAction": "greet", "Errors": [{"NextAction": "greet", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "greet", "Type": "MessageParticipant",
+               "Parameters": {"Text": "Hi, I'm the CAA roadside assistant. How can I help you today?"},
                "Transitions": {"NextAction": "agent", "Errors": [{"NextAction": "agent", "ErrorType": "NoMatchingError"}]}},
               {"Identifier": "agent", "Type": "ConnectParticipantWithAgenticCX",
                "Parameters": {"AgentConfiguration": {"WorkspaceId": "${AcxdWorkspaceId}", "ApplicationId": "${AcxdApplicationId}",
-                 "Alias": "${AcxdAlias}", "ContextVariables": {"contact_id": "$.ContactId", "channel": "CHAT"}}},
+                 "Alias": "${AcxdAlias}", "ContextVariables": {"contact_id": "$.InitialContactId", "channel": "CHAT"}},
+                 "SpeechRecognitionConfiguration": {"SpeechRecognitionEngine": "AMAZON_AGENTIC_VOICE"},
+                 "AudioFillerConfiguration": {"Enabled": false}},
                "Transitions": {"NextAction": "bye-msg",
                  "Errors": [{"NextAction": "error-msg", "ErrorType": "NoMatchingError"},
                             {"NextAction": "bye-msg", "ErrorType": "NoMatchingCondition"},
@@ -434,7 +439,7 @@ Resources:
                  "Conditions": [{"NextAction": "intake", "Condition": {"Operator": "Equals", "Operands": ["Escalation"]}}]}},
               {"Identifier": "intake", "Type": "InvokeLambdaFunction",
                "Parameters": {"LambdaFunctionARN": "${ApiFunction.Arn}", "InvocationTimeLimitSeconds": "8",
-                 "LambdaInvocationAttributes": {"op": "intake"},
+                 "LambdaInvocationAttributes": {"op": "intake", "contact_id": "$.InitialContactId"},
                  "ResponseValidation": {"ResponseType": "STRING_MAP"}},
                "Transitions": {"NextAction": "attrs", "Errors": [{"NextAction": "routing", "ErrorType": "NoMatchingError"}]}},
               {"Identifier": "attrs", "Type": "UpdateContactAttributes",
