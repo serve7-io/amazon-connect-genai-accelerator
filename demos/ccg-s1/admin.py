@@ -202,7 +202,7 @@ def _passthrough(action):
             "Transitions": {"NextAction": nxt, "Errors": [{"NextAction": nxt, "ErrorType": "NoMatchingError"}]}}
 
 
-def check_chat_flow(table, scan):
+def check_chat_flow(table, scan, *args):
     """Ask Connect why ccg-s1-chat-main is rejected. Renders the flow with the stack's real ARNs and the app's
     deployment key (never printed), creates throwaway flows zz-check-ccg-s1-<n> (deleted again) and swaps one block at a
     time for a plain message. Changes nothing else."""
@@ -233,13 +233,36 @@ def check_chat_flow(table, scan):
     def lambda_plain_attrs(acts):
         acts["intake"]["Parameters"]["LambdaInvocationAttributes"] = {"op": "intake"}
 
+    def routing_as(type_, params):
+        def mutate(acts):
+            acts["routing"]["Type"] = type_
+            acts["routing"]["Parameters"] = params
+        return mutate
+
+    crit = next(a for a in base["Actions"] if a["Identifier"] == "routing")["Parameters"]["RoutingCriteria"]
+    prof_a = [{"AttributeName": "roadside_dispatch", "AttributeValue": "certified", "Level": "4"}]
+    prof_b = [{"Name": "roadside_dispatch", "Value": "certified", "Level": 4}]
+    prof_c = [{"AttributeName": "roadside_dispatch", "AttributeValue": "certified", "ProficiencyLevel": 4,
+               "ComparisonOperator": "NumberGreaterOrEqualTo"}]
     variants = [("control: as CloudFormation sends it", variant())]
-    for ident in ("guide", "agent", "intake", "attrs", "routing", "queue", "transfer"):
-        variants.append((f"without '{ident}'", variant({ident})))
-    variants += [("routing without Expiry", variant(mutate=no_expiry)),
-                 ("intake without contact_id attribute", variant(mutate=lambda_plain_attrs)),
-                 ("only agent + messages (no guide/intake/attrs/routing/queue/transfer)",
-                  variant({"guide", "intake", "attrs", "routing", "queue", "transfer"}))]
+    if "routing" not in args:
+        for ident in ("guide", "agent", "intake", "attrs", "routing", "queue", "transfer"):
+            variants.append((f"without '{ident}'", variant({ident})))
+        variants += [("routing without Expiry", variant(mutate=no_expiry)),
+                     ("intake without contact_id attribute", variant(mutate=lambda_plain_attrs)),
+                     ("only agent + messages (no guide/intake/attrs/routing/queue/transfer)",
+                      variant({"guide", "intake", "attrs", "routing", "queue", "transfer"}))]
+    # candidate shapes for the proficiency step (demo: check-chat-flow ccg-s1 routing runs only these)
+    variants += [
+        ("routing: UpdateRoutingCriteria + RoutingCriteria", variant(mutate=routing_as("UpdateRoutingCriteria", {"RoutingCriteria": crit}))),
+        ("routing: SetRoutingCriteria + RoutingCriteria", variant(mutate=routing_as("SetRoutingCriteria", {"RoutingCriteria": crit}))),
+        ("routing: RoutingProficiencies AttributeName/AttributeValue/Level str",
+         variant(mutate=routing_as("UpdateContactRoutingBehavior", {"RoutingProficiencies": prof_a}))),
+        ("routing: RoutingProficiencies Name/Value/Level", variant(mutate=routing_as("UpdateContactRoutingBehavior", {"RoutingProficiencies": prof_b}))),
+        ("routing: RoutingProficiencies AttributeName/ProficiencyLevel/Operator",
+         variant(mutate=routing_as("UpdateContactRoutingBehavior", {"RoutingProficiencies": prof_c}))),
+        ("routing: QueuePriority 1 only", variant(mutate=routing_as("UpdateContactRoutingBehavior", {"QueuePriority": "1"}))),
+    ]
     for n, (label, content) in enumerate(variants):
         try:
             r = connect.create_contact_flow(InstanceId=INSTANCE, Name=f"zz-check-ccg-s1-{n}", Type="CONTACT_FLOW", Content=content)
