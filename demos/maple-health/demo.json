@@ -36,8 +36,11 @@
     ],
     "connect_instance_id": "78261fe2-310c-4f82-8437-4239487463ac",
     "acxd": {
-      "workspace_id": "f2e8e16b-df1e-4177-a3d8-42b833becf81"
+      "workspace_id": "f2e8e16b-df1e-4177-a3d8-42b833becf81",
+      "application_id": "206fb273-6c0b-458e-96ec-850c3b50b4ba"
     },
-    "page": {}
+    "page": {
+      "inbox_url": "https://joglnpept7wlihquvlbrqhuhxa0jbyet.lambda-url.ca-central-1.on.aws/inbox"
+    }
   }
 }
