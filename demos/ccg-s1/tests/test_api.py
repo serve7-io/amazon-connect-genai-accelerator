@@ -229,3 +229,36 @@ def test_intake_record_from_tool_calls_reaches_connect(api):
 def test_customer_facing_text_has_no_em_dashes(api):
     src = (ROOT / "lambdas" / "api" / "handler.py").read_text()
     assert "—" not in src
+
+
+def test_chat_flow_greets_and_uses_the_agentic_cx_block_shape_connect_accepts():
+    """Same shape as the kit's working chat flows (checked against Connect on 2026-10-19): the Agentic CX block needs
+    SpeechRecognitionConfiguration even for chat, and the flow greets first so the chat never waits on a silent agent.
+    The intake lookup uses the same contact id reference as the context variable ACXD sends to the Lambda."""
+    import re
+    import yaml
+
+    class Loader(yaml.SafeLoader):
+        pass
+    Loader.add_multi_constructor("!", lambda loader, suffix, node: {"!" + suffix: (
+        loader.construct_scalar(node) if isinstance(node, yaml.ScalarNode) else
+        loader.construct_sequence(node, deep=True) if isinstance(node, yaml.SequenceNode) else
+        loader.construct_mapping(node, deep=True))})
+    t = yaml.load((ROOT / "template.yaml").read_text(encoding="utf-8"), Loader=Loader)
+    body = t["Resources"]["ChatFlow"]["Properties"]["Content"]["!Sub"][0]
+    doc = json.loads(re.sub(r"\$\{[A-Za-z0-9.]+\}", "1", body))
+    acts = {a["Identifier"]: a for a in doc["Actions"]}
+    agent = next(a for a in doc["Actions"] if a["Type"] == "ConnectParticipantWithAgenticCX")["Parameters"]
+    assert agent["SpeechRecognitionConfiguration"] == {"SpeechRecognitionEngine": "AMAZON_AGENTIC_VOICE"}
+    assert agent["AudioFillerConfiguration"] == {"Enabled": False}
+    assert agent["AgentConfiguration"]["ContextVariables"]["contact_id"] == "$.InitialContactId"
+    step, seen = doc["StartAction"], []
+    while acts[step]["Type"] != "ConnectParticipantWithAgenticCX":
+        seen.append(acts[step]["Type"])
+        step = acts[step]["Transitions"]["NextAction"]
+    assert "MessageParticipant" in seen
+    assert acts["intake"]["Parameters"]["LambdaInvocationAttributes"]["contact_id"] == "$.InitialContactId"
+    for a in doc["Actions"]:
+        tr = a["Transitions"]
+        targets = {tr.get("NextAction")} | {c["NextAction"] for c in tr.get("Conditions", [])} | {e["NextAction"] for e in tr.get("Errors", [])}
+        assert targets - {None} <= set(acts), a["Identifier"]
