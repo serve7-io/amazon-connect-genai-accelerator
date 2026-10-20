@@ -33,14 +33,16 @@ The stack is named `demo-*` because the CI role may only create IAM roles with t
 - quick connect to Sarah's demo mobile, once `SarahDemoPhone` is set.
 
 **Overflow:**
-- The chat first waits for an agent with `roadside_dispatch` at level 4 or higher, for `RoadsideOverflowSeconds` (default 90).
-- After that, any agent with the Roadside queue can take it.
+- Today any agent with the Roadside queue takes the chat. The `roadside_dispatch` attribute and `set-proficiency` exist.
+- Proficiency-first routing (level 4+, then anyone after 90 s) is not in the flow yet. Connect rejects
+  `UpdateContactRoutingBehavior` with `RoutingCriteria` in flow JSON (issues #79, #81). Next step: build the
+  "Set routing criteria" block once in the console, export the flow and copy its exact JSON shape.
 - Overflow to a separate general queue is not built. It would need a customer queue flow, or adding Roadside to the Basic routing profile.
 
 **Chat flow `ccg-s1-chat-main`.** It is created only when `AcxdApplicationId` and `AcxdAlias` are set:
 1. Logging on, then the guide hook (DefaultAgentUI).
-2. Agentic CX block (`contact_id` = `$.ContactId`, `channel` = `CHAT`).
-3. Escalation: `intake` (Lambda) → `s1_*` attributes → routing criteria → `Roadside` queue.
+2. Greeting, then the Agentic CX block (`contact_id` = `$.InitialContactId`, `channel` = `CHAT`).
+3. Escalation: `intake` (Lambda) → `s1_*` attributes → `Roadside` queue.
 4. Error: apology, then on to Roadside anyway.
 5. Idle: closing message.
 6. Done: goodbye, then disconnect.
