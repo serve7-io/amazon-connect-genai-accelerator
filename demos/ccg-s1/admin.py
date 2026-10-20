@@ -8,6 +8,8 @@
   selftest          live check of ccg-s1-api through the Connect invoke path (no API key needed), then resets Sarah.
   set-proficiency   after Milos creates james.rivera in the console: Roadside Agents routing profile and the
                     roadside_dispatch proficiency (certified, level 5). Changes only that user.
+  check-chat-flow   asks Connect why ccg-s1-chat-main is rejected: throwaway flows zz-check-ccg-s1-<n> (deleted again),
+                    one block swapped out at a time. The deployment key is never printed.
 """
 import json
 
@@ -183,4 +185,72 @@ def selftest(table, scan):
         raise SystemExit(1)
 
 
-COMMANDS = {"selftest": selftest, "connect-info": connect_info, "flow-snapshot": s5_snapshot, "set-proficiency": set_proficiency}
+def render_chat_flow(values):
+    """The ChatFlow content from template.yaml with ${...} replaced from `values` (offline-testable)."""
+    import re
+    from pathlib import Path
+    text = (Path(__file__).resolve().parent / "template.yaml").read_text(encoding="utf-8")
+    body = text.split("ChatFlow:", 1)[1].split("Content: !Sub\n        - |\n", 1)[1].split("\n        - {}", 1)[0]
+    body = "\n".join(line[10:] for line in body.splitlines())
+    return json.loads(re.sub(r"\$\{([\w.]+)\}", lambda m: str(values[m.group(1)]), body))
+
+
+def _passthrough(action):
+    """Swap one block for a plain message that keeps the same next step (used to find the block Connect rejects)."""
+    nxt = action["Transitions"].get("NextAction") or "bye"
+    return {"Identifier": action["Identifier"], "Type": "MessageParticipant", "Parameters": {"Text": "check"},
+            "Transitions": {"NextAction": nxt, "Errors": [{"NextAction": nxt, "ErrorType": "NoMatchingError"}]}}
+
+
+def check_chat_flow(table, scan):
+    """Ask Connect why ccg-s1-chat-main is rejected. Renders the flow with the stack's real ARNs and the app's
+    deployment key (never printed), creates throwaway flows zz-check-ccg-s1-<n> (deleted again) and swaps one block at a
+    time for a plain message. Changes nothing else."""
+    cf = boto3.client("cloudformation", region_name=REGION)
+    st = cf.describe_stacks(StackName="demo-ccg-s1")["Stacks"][0]
+    out = {o["OutputKey"]: o["OutputValue"] for o in st.get("Outputs", [])}
+    par = {p["ParameterKey"]: p.get("ParameterValue", "") for p in st.get("Parameters", [])}
+    sm = boto3.client("secretsmanager", region_name=REGION)
+    key = json.loads(sm.get_secret_value(SecretId="demo-kit/web/ccg-s1/acxd")["SecretString"]).get("deploymentKey", "")
+    print("deployment key length", len(key))
+    values = {"GuideFlow.ContactFlowArn": out["GuideFlowArn"], "ApiFunction.Arn": out["ApiFunctionArn"],
+              "RoadsideQueue.QueueArn": out["RoadsideQueueArn"], "RoadsideOverflowSeconds": par.get("RoadsideOverflowSeconds") or 90,
+              "AcxdWorkspaceId": par.get("AcxdWorkspaceId") or "f2e8e16b-df1e-4177-a3d8-42b833becf81",
+              "AcxdApplicationId": "9088c019-349f-4343-b662-6d9c70a168f6", "AcxdAlias": key}
+    base = render_chat_flow(values)
+    connect = boto3.client("connect", region_name=REGION)
+
+    def variant(swap=(), mutate=None):
+        doc = json.loads(json.dumps(base))
+        doc["Actions"] = [_passthrough(a) if a["Identifier"] in swap else a for a in doc["Actions"]]
+        if mutate:
+            mutate({a["Identifier"]: a for a in doc["Actions"]})
+        return json.dumps(doc)
+
+    def no_expiry(acts):
+        acts["routing"]["Parameters"]["RoutingCriteria"]["Steps"][0].pop("Expiry", None)
+
+    def lambda_plain_attrs(acts):
+        acts["intake"]["Parameters"]["LambdaInvocationAttributes"] = {"op": "intake"}
+
+    variants = [("control: as CloudFormation sends it", variant())]
+    for ident in ("guide", "agent", "intake", "attrs", "routing", "queue", "transfer"):
+        variants.append((f"without '{ident}'", variant({ident})))
+    variants += [("routing without Expiry", variant(mutate=no_expiry)),
+                 ("intake without contact_id attribute", variant(mutate=lambda_plain_attrs)),
+                 ("only agent + messages (no guide/intake/attrs/routing/queue/transfer)",
+                  variant({"guide", "intake", "attrs", "routing", "queue", "transfer"}))]
+    for n, (label, content) in enumerate(variants):
+        try:
+            r = connect.create_contact_flow(InstanceId=INSTANCE, Name=f"zz-check-ccg-s1-{n}", Type="CONTACT_FLOW", Content=content)
+        except Exception as e:  # noqa: BLE001 - we want Connect's whole answer
+            resp = getattr(e, "response", {}) or {}
+            detail = resp.get("problems") or resp.get("Problems") or resp.get("Error", {}).get("Message") or repr(e)
+            print(f"REJECTED  {label}\n          {json.dumps(detail)[:1500]}")
+            continue
+        connect.delete_contact_flow(InstanceId=INSTANCE, ContactFlowId=r["ContactFlowId"])
+        print(f"ACCEPTED  {label}")
+
+
+COMMANDS = {"selftest": selftest, "connect-info": connect_info, "flow-snapshot": s5_snapshot, "set-proficiency": set_proficiency,
+            "check-chat-flow": check_chat_flow}
