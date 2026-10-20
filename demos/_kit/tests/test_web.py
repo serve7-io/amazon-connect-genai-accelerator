@@ -119,7 +119,7 @@ def render():
 def test_every_web_demo_renders(render, demo):
     page = render.render(demo, env={})
     cfg = json.loads(re.search(r"const CFG = (\{.*?\});\n", page, re.S).group(1))
-    assert cfg["demo"] == demo and cfg["chatReady"] is False and cfg["liveSync"] is None
+    assert cfg["demo"] == demo and cfg["chatReady"] is False and cfg["liveSync"] is None and isinstance(cfg["page"], dict)
     assert '<meta name="robots" content="noindex,nofollow">' in page
     assert "/start-chat" in page and "@amazon-connect-touchpoint/web@" in page and 'integrity="sha384-' in page
     assert "__" not in re.sub(r"__proto__", "", page).replace("amazonConnectTouchpoint", "")   # no unreplaced tokens
@@ -183,7 +183,9 @@ _Loader.add_multi_constructor("!", _tag)
 def test_demo_config_and_secret_hygiene(demo):
     cfg = json.loads((DEMOS / demo / "demo.json").read_text(encoding="utf-8"))
     web = cfg["web"]
-    assert UUID.match(web["connect_instance_id"]) and UUID.match(web["acxd"]["workspace_id"]) and UUID.match(web["acxd"]["application_id"])
+    assert UUID.match(web["connect_instance_id"]) and UUID.match(web["acxd"]["workspace_id"])
+    # a new demo has no ACXD app yet (it is built after the first deploy); once set, it must be an id
+    assert "application_id" not in web["acxd"] or UUID.match(web["acxd"]["application_id"])
     flat = json.dumps(cfg).lower()
     assert "apikey" not in flat and "deploymentkey" not in flat      # keys live in Secrets Manager, never in the repo
 

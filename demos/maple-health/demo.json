@@ -1,0 +1,43 @@
+{
+  "name": "maple-health",
+  "title": "Maple Health Network patient chat (email code, appointments, EN/FR, live agent)",
+  "stack": "demo-maple-health",
+  "region": "ca-central-1",
+  "lambda_dir": "lambdas/api",
+  "seed": "data/seed.json",
+  "acxd_secret": "ccg_s5_api_key",
+  "status_tables": [
+    "AppointmentsTable",
+    "SessionsTable",
+    "InboxTable"
+  ],
+  "tags": {
+    "serve7:project": "demo",
+    "serve7:demo": "maple-health",
+    "serve7:data-classification": "synthetic"
+  },
+  "smoke": {
+    "op": "clinic_info"
+  },
+  "web": {
+    "title": "Maple Health Network - patient chat",
+    "brand": "Maple Health Network / Réseau Maple Santé",
+    "assistant_name": "Maple Health assistant",
+    "blurb": "Ask about our clinics, or verify your identity with an email code to see, book, change or cancel appointments. You can ask for a person at any time. Fictional organization, invented data.",
+    "accent": "#c8102e",
+    "language": "en-US",
+    "display_name": "Patient",
+    "prompts": [
+      "What are the hours of the Kanata clinic?",
+      "I'd like to book a flu shot",
+      "I want to move my appointment",
+      "Je voudrais annuler mon rendez-vous",
+      "Can I talk to a person?"
+    ],
+    "connect_instance_id": "78261fe2-310c-4f82-8437-4239487463ac",
+    "acxd": {
+      "workspace_id": "f2e8e16b-df1e-4177-a3d8-42b833becf81"
+    },
+    "page": {}
+  }
+}
