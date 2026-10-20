@@ -47,7 +47,7 @@ def load_demo(name):
 def _js(obj):
     """JSON that is safe inside an HTML <script> block."""
     s = json.dumps(obj, ensure_ascii=False)
-    for ch, rep in (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026"), (" ", "\\u2028"), (" ", "\\u2029")):
+    for ch, rep in (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026"), (chr(0x2028), "\\u2028"), (chr(0x2029), "\\u2029")):
         s = s.replace(ch, rep)
     return s
 
