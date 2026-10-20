@@ -6,6 +6,7 @@
   "lambda_dir": "lambdas/api",
   "seed": "lambdas/api/seed.json",
   "acxd_secret": "ccg_s5_api_key",
+  "acxd_application_id": "9088c019-349f-4343-b662-6d9c70a168f6",
   "status_tables": [
     "MembersTable",
     "DispatchesTable",

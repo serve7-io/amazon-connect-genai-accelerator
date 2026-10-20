@@ -64,7 +64,13 @@ fi
 if grep -qE '^  AcxdAlias:' "$D/template.yaml"; then
   ALIAS=$(aws secretsmanager get-secret-value --secret-id "demo-kit/web/$NAME/acxd" --query SecretString --output text 2>/dev/null \
     | python3 -c "import json,sys;print(json.load(sys.stdin).get('deploymentKey',''))" 2>/dev/null || true)
-  [ -n "$ALIAS" ] && EXTRA+=("AcxdAlias=$ALIAS")
+  if [ -n "$ALIAS" ]; then EXTRA+=("AcxdAlias=$ALIAS"); echo "ACXD deployment key: found"; else echo "ACXD deployment key: not set yet (no chat flow)"; fi
+fi
+# Demos without a "web" block can name their ACXD app in demo.json ("acxd_application_id"). It is passed explicitly,
+# because "cloudformation deploy" keeps a parameter's previous value instead of a new template default.
+APPID=$(cfg ".get('acxd_application_id','')")
+if [ -n "$APPID" ] && grep -qE '^  AcxdApplicationId:' "$D/template.yaml"; then
+  EXTRA+=("AcxdApplicationId=$APPID")
 fi
 # shellcheck disable=SC2086
 aws cloudformation deploy --stack-name "$STACK" --template-file "$D/template.yaml" --capabilities CAPABILITY_IAM \
