@@ -83,3 +83,24 @@ works as a normal chat. Note that the keys end up in the public page (the ACXD D
 The pages are public to anyone with the link (not indexed). They contain no data of their own, and all demo data is synthetic. `start-chat`
 creates a Connect chat contact per visitor, so share the link only as widely as you are happy to pay for chats.
 `demo: delete <demo>` removes the page and the chat wiring but keeps the shared stack and the key secret.
+
+## Ship without clicks (auto-ship)
+
+Opt-in pipeline for small demo changes: `.github/workflows/auto-ship.yml` (source copy `auto-ship.workflow.yml`, logic in
+`auto_ship.py`, tests in `tests/test_auto_ship.py` and `tests/test_workflows.py`).
+
+1. As the owner (`OWNERS` in the workflow), push a branch named `auto/<anything>`.
+2. The branch is merged into a copy of `main` and every check runs on the result: each demo's tests and `cfn-lint`,
+   the kit tests, the shared web stack lint, `bash -n` on the kit scripts.
+3. If the merge only touches `demos/` (never `demos/ccg-s5/`), `docs/` or `README.md` and the checks pass, it is pushed
+   to `main` and the branch is deleted. Changed demos listed in `AUTO_DEPLOY` (a kit change counts for all of them)
+   are deployed by dispatching `demo.yml` with `deploy <demo>`.
+4. Anything else (merge conflict, files outside those folders, failing checks) is not merged; a pull request is opened
+   for review. Opening it needs Settings > Actions > General > "Allow GitHub Actions to create and approve pull
+   requests"; without it the run only logs the reason.
+
+Notes:
+- `demo.yml` must allow the actor `github-actions[bot]` (`ALLOWED_ACTORS`), because the dispatch uses `GITHUB_TOKEN`.
+- The live workflow files must stay identical to their source copies (`test_live_workflows_match_their_source_copies`).
+- A branch that edits `auto-ship.yml` runs its own version of the workflow, so auto-ship is not a defence against
+  someone who can already push to the repo. It only saves clicks for the owner.
