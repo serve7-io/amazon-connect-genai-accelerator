@@ -19,3 +19,4 @@
   .big { margin: 0 0 12px; }
   .panel { border-left: 4px solid var(--accent); }
   .panel.ok { border-left-color: #2e9d5b; }
+  .panel.cancelled { border-left-color: #c97a00; }

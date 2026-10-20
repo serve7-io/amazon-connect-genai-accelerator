@@ -25,6 +25,14 @@
   };
   const reveal = (id) => { const el = byId(id); if (el) { el.hidden = false; el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } };
   const dates = (a, b) => [a, b].filter(Boolean).join(" to ");
+  // the confirmation panel is reused for a cancellation: heading, colour and pickup note change, the number stays
+  const setCancelled = (on) => {
+    const card = byId("confirm-card");
+    card.classList.toggle("cancelled", on);
+    card.querySelector("h2").textContent = on ? "Booking cancelled" : "Booking confirmed";
+    const note = card.querySelector(".hint");
+    if (note) { note.hidden = on; }
+  };
 
   try {
     await touchpoint.sendContext({
@@ -102,6 +110,18 @@
             c = c || {};
             text("c-number", c.confirmation); text("c-model", c.model); text("c-dates", dates(c.start_date, c.return_date) || "-");
             text("c-total", eur(c.total_eur)); text("c-deposit", eur(c.deposit_eur));
+            setCancelled(false);
+            reveal("confirm-card");
+          }
+        },
+        {
+          action: "show_cancellation",
+          description: "Show that a booking was cancelled, after the rental API cancelled it (cancelled true). The confirmation panel changes to cancelled.",
+          schema: { type: "object", properties: { confirmation: { type: "string", description: "The cancelled confirmation number, e.g. REN-12345" } }, required: ["confirmation"] },
+          handler: (c) => {
+            c = c || {};
+            text("c-number", c.confirmation);
+            setCancelled(true);
             reveal("confirm-card");
           }
         }
