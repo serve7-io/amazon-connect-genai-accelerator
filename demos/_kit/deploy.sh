@@ -58,6 +58,10 @@ TAGS=$(python3 -c "import json;print(' '.join(f'{k}={v}' for k,v in json.load(op
 EXTRA=()
 if python3 -c "import json,sys;sys.exit(0 if 'web' in json.load(open('$D/demo.json')) else 1)"; then
   mapfile -t EXTRA < <(python3 "$KIT/web/render.py" "$NAME" --stack-params)
+fi
+# Any demo whose template has an AcxdAlias parameter (web demos, and demos with their own chat page such as ccg-s1)
+# gets the ACXD app's Production deployment key from Secrets Manager demo-kit/web/<demo>/acxd (set-acxd-keys.sh).
+if grep -qE '^  AcxdAlias:' "$D/template.yaml"; then
   ALIAS=$(aws secretsmanager get-secret-value --secret-id "demo-kit/web/$NAME/acxd" --query SecretString --output text 2>/dev/null \
     | python3 -c "import json,sys;print(json.load(sys.stdin).get('deploymentKey',''))" 2>/dev/null || true)
   [ -n "$ALIAS" ] && EXTRA+=("AcxdAlias=$ALIAS")
