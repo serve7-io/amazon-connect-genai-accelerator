@@ -12,6 +12,8 @@ Environment (set by deploy-web.sh, never written to the repo):
     WEB_CHAT_READY   "1" when the demo's chat flow exists and is wired; otherwise the page shows "chat not available".
     WEB_VOICE_READY  "1" when the demo's voice flow exists and is wired; the page then offers a Chat / Talk toggle.
 
+The "page" object of the web block is passed to the page as CFG.page (for example a demo API URL for actions.js).
+
 Optional per-demo files (trusted repo content, inserted as is):
     demos/<demo>/web/actions.js   after Touchpoint starts; can use the variable `touchpoint` and `await`
                                   (for example touchpoint.sendContext({actions: [...]}) for Live Sync)
@@ -45,7 +47,7 @@ def load_demo(name):
 def _js(obj):
     """JSON that is safe inside an HTML <script> block."""
     s = json.dumps(obj, ensure_ascii=False)
-    for ch, rep in (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026"), ("\u2028", "\\u2028"), ("\u2029", "\\u2029")):
+    for ch, rep in (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026"), (" ", "\\u2028"), (" ", "\\u2029")):
         s = s.replace(ch, rep)
     return s
 
@@ -76,6 +78,7 @@ def render(name, env=None):
         "chatReady": env.get("WEB_CHAT_READY") == "1" and bool(web.get("connect_instance_id")),
         "voiceReady": env.get("WEB_VOICE_READY") == "1" and bool(web.get("connect_instance_id")),
         "liveSync": live,
+        "page": web.get("page") if isinstance(web.get("page"), dict) else {},   # demo-specific values for web/actions.js
     }
     def extra(name):
         f = d / "web" / name
