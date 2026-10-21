@@ -13,6 +13,7 @@
   header { display: flex; align-items: center; gap: 12px; padding: 14px 24px; background: var(--card); border-bottom: 4px solid var(--accent); }
   header b { font-size: 18px; }
   .mode { display: flex; gap: 6px; margin-left: 12px; }
+  [hidden] { display: none !important; }   /* .mode sets display:flex, which would otherwise show a hidden Talk toggle */
   .mode button { font: inherit; font-size: 13px; color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 4px 14px; cursor: pointer; }
   .mode button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #1d232b; font-weight: 600; }
   .badge { margin-left: auto; font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
