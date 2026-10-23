@@ -1,0 +1,173 @@
+{
+  "_note": "Fictional demo data for CCG RFP Scenario 5. Names, numbers and cards are invented; phone numbers use the 555-01xx fictional range.",
+  "members": [
+    {
+      "member_id": "M-1001",
+      "name": "Avery Tremblay",
+      "phone": "+14165550111",
+      "dob": "1984-03-12",
+      "sms_capable": true,
+      "email": "avery.tremblay@example.com",
+      "language": "en"
+    },
+    {
+      "member_id": "M-1002",
+      "name": "Jordan Okafor",
+      "phone": "+16475550112",
+      "dob": "1979-11-30",
+      "sms_capable": false,
+      "email": "jordan.okafor@example.com",
+      "language": "en"
+    },
+    {
+      "member_id": "M-1003",
+      "name": "Camille Gagnon",
+      "phone": "+15145550113",
+      "dob": "1991-07-04",
+      "sms_capable": true,
+      "email": "camille.gagnon@example.com",
+      "language": "fr"
+    },
+    {
+      "member_id": "M-60425183",
+      "name": "Thomas Beaulieu",
+      "tier": "Plus",
+      "phone": "+16135550114",
+      "dob": "1975-06-12",
+      "postal_code": "K1A 0B1",
+      "city": "Ottawa, ON",
+      "vehicle": "2022 Honda CR-V",
+      "sms_capable": true,
+      "email": "thomas.beaulieu@example.com",
+      "language": "en"
+    },
+    {
+      "member_id": "M-50318294",
+      "name": "Rachel Morin",
+      "tier": "Premier",
+      "phone": "+16135550127",
+      "dob": "1988-02-03",
+      "postal_code": "K2P 1L4",
+      "city": "Ottawa, ON",
+      "vehicle": "2021 Subaru Outback",
+      "sms_capable": true,
+      "email": "rachel.morin@example.com",
+      "language": "en"
+    },
+    {
+      "member_id": "M-70539261",
+      "name": "Nadia Haddad",
+      "tier": "Basic",
+      "phone": "+16135550139",
+      "dob": "1991-09-21",
+      "postal_code": "K1S 5B6",
+      "city": "Ottawa, ON",
+      "vehicle": "2020 Mazda CX-5",
+      "sms_capable": true,
+      "email": "nadia.haddad@example.com",
+      "language": "en"
+    }
+  ],
+  "policies": [
+    {
+      "policy_id": "AU-88214471",
+      "member_id": "M-1001",
+      "line": "auto",
+      "renewal_date": "2026-11-01",
+      "plan_type": "full_pay",
+      "amount_due": "1284.60",
+      "currency": "CAD",
+      "status": "renewal_due"
+    },
+    {
+      "policy_id": "HO-55309120",
+      "member_id": "M-1001",
+      "line": "property",
+      "renewal_date": "2026-11-15",
+      "plan_type": "full_pay",
+      "amount_due": "912.00",
+      "currency": "CAD",
+      "status": "renewal_due"
+    },
+    {
+      "policy_id": "AU-77120385",
+      "member_id": "M-1002",
+      "line": "auto",
+      "renewal_date": "2026-10-28",
+      "plan_type": "monthly",
+      "amount_due": "143.25",
+      "currency": "CAD",
+      "status": "renewal_due"
+    },
+    {
+      "policy_id": "HO-66402218",
+      "member_id": "M-1003",
+      "line": "property",
+      "renewal_date": "2026-11-05",
+      "plan_type": "full_pay",
+      "amount_due": "1046.80",
+      "currency": "CAD",
+      "status": "renewal_due"
+    },
+    {
+      "policy_id": "HI-2024-88312",
+      "member_id": "M-60425183",
+      "line": "home",
+      "renewal_date": "2026-10-28",
+      "plan_type": "full_pay",
+      "amount_due": "1247.00",
+      "currency": "CAD",
+      "status": "renewal_due"
+    },
+    {
+      "policy_id": "AI-2024-66201",
+      "member_id": "M-60425183",
+      "line": "auto",
+      "renewal_date": "2026-11-15",
+      "plan_type": "full_pay",
+      "amount_due": "863.00",
+      "currency": "CAD",
+      "status": "renewal_due"
+    }
+  ],
+  "payment_methods": [
+    {
+      "member_id": "M-1001",
+      "token": "tok_demo_visa_1234",
+      "brand": "Visa",
+      "last4": "1234",
+      "expiry": "2028-09",
+      "default": true
+    },
+    {
+      "member_id": "M-1002",
+      "token": "tok_demo_mc_5678",
+      "brand": "Mastercard",
+      "last4": "5678",
+      "expiry": "2026-08",
+      "default": true
+    },
+    {
+      "member_id": "M-1003",
+      "token": "tok_demo_visa_4321",
+      "brand": "Visa",
+      "last4": "4321",
+      "expiry": "2027-12",
+      "default": true
+    },
+    {
+      "member_id": "M-60425183",
+      "token": "tok_demo_mc_5521",
+      "brand": "Mastercard",
+      "last4": "5521",
+      "expiry": "2028-04",
+      "default": true
+    }
+  ],
+  "test_cards": {
+    "_note": "Simulated gateway rules (not a real processor). Any Luhn-valid number ending as below.",
+    "approve": "4242 4242 4242 4242",
+    "decline": "4000 0000 0000 0002",
+    "gateway_error": "4000 0000 0000 0119"
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "applicationId": "",
+  "name": "ccg-renewal-payment",
+  "description": "CCG RFP Scenario 5 (synthetic data): voice renewal payment. Card data is never collected in this app.",
+  "type": "multilingual",
+  "metadata": {
+    "path": "",
+    "tags": [
+      "serve7-demo",
+      "ccg-rfp"
+    ]
+  },
+  "deploymentSettings": {
+    "hosting": {
+      "enabled": false
+    },
+    "contextVariables": [],
+    "environment": "production",
+    "oneClickDeployEnabled": false
+  },
+  "interactionMode": "standard",
+  "instanceType": "standard",
+  "flows": [
+    {
+      "flowId": "ccgrenewalpayment"
+    }
+  ],
+  "settings": {
+    "defaultFlows": {
+      "fallback": {
+        "quickReplies": [
+          "Sorry, something went wrong. Let me connect you with a team member."
+        ]
+      },
+      "unknown": {
+        "quickReplies": [
+          "I'm sorry, I didn't catch that."
+        ]
+      },
+      "welcome": {
+        "flowId": "ccgrenewalpayment"
+      }
+    },
+    "conversationTTL": 5,
+    "thresholds": {
+      "incomprehensionCount": 2
+    },
+    "clusters": {
+      "enabled": false,
+      "frequency": {
+        "count": 1,
+        "resolution": "MONTH"
+      },
+      "phraseThreshold": {
+        "count": 100
+      },
+      "retention": {
+        "count": 30,
+        "resolution": "DAY"
+      }
+    },
+    "guardrails": [],
+    "repeatOnIncomprehension": false,
+    "lifecycleHooks": {},
+    "languageCode": "en-US",
+    "languageCodes": [
+      "en-US"
+    ],
+    "languageSettings": [
+      {
+        "languageCode": "en-US",
+        "useNativeLanguage": true,
+        "useLex3pAsr": false,
+        "region": "global"
+      }
+    ]
+  }
+}

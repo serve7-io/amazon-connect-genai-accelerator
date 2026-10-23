@@ -1,0 +1,354 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Serve7 demo - Maple Health Network (fictional Canadian clinic network) patient chat: email one-time code, clinic
+  appointments in English and French, hand-off to a live agent. Synthetic data only. Deployed by demos/_kit/deploy.sh.
+
+Parameters:
+  CodeBucket:
+    Type: String
+  CodeKey:
+    Type: String
+  ApiKeySecretArn:
+    Type: String
+    Description: Secrets Manager secret (plain string) used as x-api-key. Shared by all kit demos.
+  ConnectInstanceId:
+    Type: String
+    Default: ""
+    Description: Connect instance id (demo.json web.connect_instance_id). Empty = no Connect resources.
+  AcxdWorkspaceId:
+    Type: String
+    Default: ""
+  AcxdApplicationId:
+    Type: String
+    Default: ""
+  AcxdAlias:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Production deployment key of the ACXD app (Secrets Manager demo-kit/web/<demo>/acxd). Empty = no chat flow.
+
+Conditions:
+  HasInstance: !Not [!Equals [!Ref ConnectInstanceId, ""]]
+  HasChat: !And
+    - !Condition HasInstance
+    - !Not [!Equals [!Ref AcxdWorkspaceId, ""]]
+    - !Not [!Equals [!Ref AcxdApplicationId, ""]]
+    - !Not [!Equals [!Ref AcxdAlias, ""]]
+
+Resources:
+  # ---------- Data ----------
+  ClinicsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: clinic_id, AttributeType: S}]
+      KeySchema: [{AttributeName: clinic_id, KeyType: HASH}]
+      SSESpecification: {SSEEnabled: true}
+  SlotsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: slot_id, AttributeType: S}]
+      KeySchema: [{AttributeName: slot_id, KeyType: HASH}]
+      SSESpecification: {SSEEnabled: true}
+  PatientsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: patient_id, AttributeType: S}
+        - {AttributeName: email_key, AttributeType: S}
+      KeySchema: [{AttributeName: patient_id, KeyType: HASH}]
+      GlobalSecondaryIndexes:
+        - IndexName: email-index
+          KeySchema: [{AttributeName: email_key, KeyType: HASH}]
+          Projection: {ProjectionType: ALL}
+      SSESpecification: {SSEEnabled: true}
+  AppointmentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: appointment_id, AttributeType: S}]
+      KeySchema: [{AttributeName: appointment_id, KeyType: HASH}]
+      SSESpecification: {SSEEnabled: true}
+  SessionsTable:   # one row per chat (Connect contact id): code hash, tries, verified patient, what happened
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: contact_id, AttributeType: S}]
+      KeySchema: [{AttributeName: contact_id, KeyType: HASH}]
+      TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
+      SSESpecification: {SSEEnabled: true}
+  InboxTable:      # the simulated email inbox shown on the demo page (a real build would send with Amazon SES)
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: msg_id, AttributeType: S}]
+      KeySchema: [{AttributeName: msg_id, KeyType: HASH}]
+      TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
+      SSESpecification: {SSEEnabled: true}
+
+  # ---------- API ----------
+  ApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: data
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:Scan, dynamodb:Query]
+                Resource:
+                  - !GetAtt ClinicsTable.Arn
+                  - !GetAtt SlotsTable.Arn
+                  - !GetAtt PatientsTable.Arn
+                  - !Sub "${PatientsTable.Arn}/index/*"
+                  - !GetAtt AppointmentsTable.Arn
+                  - !GetAtt SessionsTable.Arn
+                  - !GetAtt InboxTable.Arn
+
+  ApiFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Maple Health demo API (ACXD data requests, email code, appointments, simulated inbox, Connect intake)
+      Runtime: python3.13
+      Handler: handler.handler
+      Timeout: 8
+      MemorySize: 256
+      Role: !GetAtt ApiRole.Arn
+      Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
+      Environment:
+        Variables:
+          CLINICS_TABLE: !Ref ClinicsTable
+          SLOTS_TABLE: !Ref SlotsTable
+          PATIENTS_TABLE: !Ref PatientsTable
+          APPOINTMENTS_TABLE: !Ref AppointmentsTable
+          SESSIONS_TABLE: !Ref SessionsTable
+          INBOX_TABLE: !Ref InboxTable
+          API_KEY: !Sub "{{resolve:secretsmanager:${ApiKeySecretArn}}}"
+  ApiFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt ApiFunction.Arn
+      AuthType: NONE   # operations check x-api-key; GET /inbox (demo addresses only) is public for the demo page
+      Cors:
+        AllowOrigins: ["*"]
+        AllowMethods: [GET]
+        MaxAge: 300
+  ApiUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+  ApiInvokeViaUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+  # ---------- Connect: invoke permission, queue, routing profile, agent guide ----------
+  ConnectInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: HasInstance
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunction
+      Principal: connect.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:connect:${AWS::Region}:${AWS::AccountId}:instance/${ConnectInstanceId}"
+      SourceAccount: !Ref AWS::AccountId
+  ConnectLambdaAssociation:
+    Type: AWS::Connect::IntegrationAssociation
+    Condition: HasInstance
+    Properties:
+      InstanceId: !Sub "arn:${AWS::Partition}:connect:${AWS::Region}:${AWS::AccountId}:instance/${ConnectInstanceId}"
+      IntegrationType: LAMBDA_FUNCTION
+      IntegrationArn: !GetAtt ApiFunction.Arn
+
+  SupportHours:
+    Type: AWS::Connect::HoursOfOperation
+    Condition: HasInstance
+    Properties:
+      InstanceArn: !Sub "arn:${AWS::Partition}:connect:${AWS::Region}:${AWS::AccountId}:instance/${ConnectInstanceId}"
+      Name: Maple Health 24x7 (demo)
+      Description: Patient support for the Maple Health demo, open all day so the demo always works
+      TimeZone: America/Toronto
+      Config:
+        - {Day: MONDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
+        - {Day: TUESDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
+        - {Day: WEDNESDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
+        - {Day: THURSDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
+        - {Day: FRIDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
+        - {Day: SATURDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
+        - {Day: SUNDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
+  SupportQueue:
+    Type: AWS::Connect::Queue
+    Condition: HasInstance
+    Properties:
+      InstanceArn: !Sub "arn:${AWS::Partition}:connect:${AWS::Region}:${AWS::AccountId}:instance/${ConnectInstanceId}"
+      Name: Maple Health Patient Support
+      Description: Maple Health demo - chats handed over by the AI assistant (patient verified by email code or not)
+      HoursOfOperationArn: !GetAtt SupportHours.HoursOfOperationArn
+  SupportRoutingProfile:
+    Type: AWS::Connect::RoutingProfile
+    Condition: HasInstance
+    Properties:
+      InstanceArn: !Sub "arn:${AWS::Partition}:connect:${AWS::Region}:${AWS::AccountId}:instance/${ConnectInstanceId}"
+      Name: Maple Health Agents
+      Description: "Maple Health demo - chat from the Patient Support queue (issue: demo set-agent maple-health USER)"
+      DefaultOutboundQueueArn: !GetAtt SupportQueue.QueueArn
+      MediaConcurrencies:
+        - {Channel: CHAT, Concurrency: 2}
+        - {Channel: VOICE, Concurrency: 1}
+      QueueConfigs:
+        - {Delay: 0, Priority: 1, QueueReference: {Channel: CHAT, QueueArn: !GetAtt SupportQueue.QueueArn}}
+
+  # Step-by-step guide shown to the agent when the chat is offered: who the patient is, verified or not, what the AI did.
+  GuideFlow:
+    Type: AWS::Connect::ContactFlow
+    Condition: HasInstance
+    Properties:
+      InstanceArn: !Sub "arn:${AWS::Partition}:connect:${AWS::Region}:${AWS::AccountId}:instance/${ConnectInstanceId}"
+      Name: maple-health-guide
+      Type: CONTACT_FLOW
+      Description: Maple Health demo agent guide - patient card from the AI chat (verification, next appointment, summary).
+      Content: !Sub
+        - |
+          {
+            "Version": "2019-10-30",
+            "StartAction": "card",
+            "Actions": [
+              {"Identifier": "card", "Type": "ShowView",
+               "Parameters": {"ViewResource": {"Id": "${FormView}"}, "InvocationTimeLimitSeconds": "1800",
+                 "ViewData": {
+                   "Heading": "Patient chat handed over by the AI assistant",
+                   "SubHeading": "$.Attributes.mh_verified",
+                   "AttributeBar": [
+                     {"Label": "Patient", "Value": "$.Attributes.mh_patient_name"},
+                     {"Label": "Patient ID", "Value": "$.Attributes.mh_patient_id", "Copyable": true},
+                     {"Label": "Identity", "Value": "$.Attributes.mh_verified"},
+                     {"Label": "Language", "Value": "$.Attributes.mh_language"}
+                   ],
+                   "Sections": [
+                     {"_id": "case", "Type": "FormSection", "Heading": "From the AI chat",
+                      "Items": [{"LayoutConfiguration": {"Grid": [{"colspan": {"default": "12"}}]},
+                        "Items": [
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Next appointment", "Name": "next", "DefaultValue": "$.Attributes.mh_next_appointment"},
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Summary", "Name": "summary", "DefaultValue": "$.Attributes.mh_summary"}
+                        ]}]}
+                   ],
+                   "Next": {"Label": "Done"}
+                 }},
+               "Transitions": {"NextAction": "end",
+                 "Errors": [{"NextAction": "end", "ErrorType": "NoMatchingCondition"},
+                            {"NextAction": "end", "ErrorType": "NoMatchingError"},
+                            {"NextAction": "end", "ErrorType": "TimeLimitExceeded"}]}},
+              {"Identifier": "end", "Type": "EndFlowExecution", "Parameters": {}, "Transitions": {}}
+            ]
+          }
+        - FormView: !Sub "arn:${AWS::Partition}:connect:${AWS::Region}:aws:view/form:1"
+
+  # ---------- Web chat: greeting, ACXD assistant, and on escalation the session record -> attributes -> queue ----------
+  ChatFlow:
+    Type: AWS::Connect::ContactFlow
+    Condition: HasChat
+    DependsOn: [ConnectLambdaAssociation, ConnectInvokePermission]
+    Properties:
+      InstanceArn: !Sub "arn:${AWS::Partition}:connect:${AWS::Region}:${AWS::AccountId}:instance/${ConnectInstanceId}"
+      Name: !Sub "${AWS::StackName}-chat"
+      Type: CONTACT_FLOW
+      Description: >-
+        Maple Health demo web chat. The ACXD assistant verifies the patient with an email code and manages appointments;
+        on escalation the server-side session record becomes mh_* attributes and the chat goes to Patient Support.
+      Content: !Sub |
+        {
+          "Version": "2019-10-30",
+          "StartAction": "log",
+          "Actions": [
+            {"Identifier": "log", "Type": "UpdateFlowLoggingBehavior",
+             "Parameters": {"FlowLoggingBehavior": "Enabled"}, "Transitions": {"NextAction": "guide"}},
+            {"Identifier": "guide", "Type": "UpdateContactEventHooks",
+             "Parameters": {"EventHooks": {"DefaultAgentUI": "${GuideFlow.ContactFlowArn}"}},
+             "Transitions": {"NextAction": "greet", "Errors": [{"NextAction": "greet", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "greet", "Type": "MessageParticipant",
+             "Parameters": {"Text": "Hello! I'm the Maple Health virtual assistant. I can help with clinic information and your appointments. How can I help? / Bonjour! Je suis l'assistant virtuel de Maple Santé. Comment puis-je vous aider?"},
+             "Transitions": {"NextAction": "agent", "Errors": [{"NextAction": "agent", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "agent", "Type": "ConnectParticipantWithAgenticCX",
+             "Parameters": {"AgentConfiguration": {"WorkspaceId": "${AcxdWorkspaceId}", "ApplicationId": "${AcxdApplicationId}",
+               "Alias": "${AcxdAlias}", "ContextVariables": {"contact_id": "$.InitialContactId", "channel": "CHAT"}},
+               "SpeechRecognitionConfiguration": {"SpeechRecognitionEngine": "AMAZON_AGENTIC_VOICE"},
+               "AudioFillerConfiguration": {"Enabled": false}},
+             "Transitions": {"NextAction": "bye-msg",
+               "Errors": [{"NextAction": "error-msg", "ErrorType": "NoMatchingError"},
+                          {"NextAction": "bye-msg", "ErrorType": "NoMatchingCondition"},
+                          {"NextAction": "idle-msg", "ErrorType": "InputTimeLimitExceeded"}],
+               "Conditions": [{"NextAction": "intake", "Condition": {"Operator": "Equals", "Operands": ["Escalation"]}}]}},
+            {"Identifier": "intake", "Type": "InvokeLambdaFunction",
+             "Parameters": {"LambdaFunctionARN": "${ApiFunction.Arn}", "InvocationTimeLimitSeconds": "8",
+               "LambdaInvocationAttributes": {"op": "intake", "contact_id": "$.InitialContactId"},
+               "ResponseValidation": {"ResponseType": "STRING_MAP"}},
+             "Transitions": {"NextAction": "attrs", "Errors": [{"NextAction": "queue", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "attrs", "Type": "UpdateContactAttributes",
+             "Parameters": {"TargetContact": "Current", "Attributes": {
+               "mh_verified": "$.External.verified", "mh_patient_name": "$.External.patient_name",
+               "mh_patient_id": "$.External.patient_id", "mh_language": "$.External.language",
+               "mh_next_appointment": "$.External.next_appointment", "mh_summary": "$.External.summary"}},
+             "Transitions": {"NextAction": "queue", "Errors": [{"NextAction": "queue", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "queue", "Type": "UpdateContactTargetQueue",
+             "Parameters": {"QueueId": "${SupportQueue.QueueArn}"},
+             "Transitions": {"NextAction": "transfer", "Errors": [{"NextAction": "busy", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "transfer", "Type": "TransferContactToQueue", "Parameters": {},
+             "Transitions": {"NextAction": "busy", "Errors": [{"NextAction": "busy", "ErrorType": "QueueAtCapacity"},
+                                                              {"NextAction": "busy", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "error-msg", "Type": "MessageParticipant",
+             "Parameters": {"Text": "Sorry, something went wrong on our side. I'm connecting you with our patient support team. / Désolé, un problème est survenu. Je vous transfère à notre équipe."},
+             "Transitions": {"NextAction": "queue", "Errors": [{"NextAction": "queue", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "idle-msg", "Type": "MessageParticipant",
+             "Parameters": {"Text": "I haven't heard from you, so I'll close this chat for now. / Je n'ai pas eu de réponse, je ferme donc ce clavardage."},
+             "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "busy", "Type": "MessageParticipant",
+             "Parameters": {"Text": "Our patient support team can't take the chat right now. Please call your clinic. / Notre équipe n'est pas disponible pour le moment. Veuillez appeler votre clinique."},
+             "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "bye-msg", "Type": "MessageParticipant",
+             "Parameters": {"Text": "Thank you for contacting Maple Health. Take care! / Merci d'avoir communiqué avec Maple Santé. Prenez soin de vous!"},
+             "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+            {"Identifier": "bye", "Type": "DisconnectParticipant", "Parameters": {}, "Transitions": {}}
+          ]
+        }
+
+Outputs:
+  AcxdApiUrl:
+    Value: !GetAtt ApiFunctionUrl.FunctionUrl
+  InboxUrl:
+    Value: !Sub "${ApiFunctionUrl.FunctionUrl}inbox"
+  ClinicsTable:
+    Value: !Ref ClinicsTable
+  SlotsTable:
+    Value: !Ref SlotsTable
+  PatientsTable:
+    Value: !Ref PatientsTable
+  AppointmentsTable:
+    Value: !Ref AppointmentsTable
+  SessionsTable:
+    Value: !Ref SessionsTable
+  InboxTable:
+    Value: !Ref InboxTable
+  ApiFunctionName:
+    Value: !Ref ApiFunction
+  SupportQueueArn:
+    Condition: HasInstance
+    Value: !GetAtt SupportQueue.QueueArn
+  GuideFlowArn:
+    Condition: HasInstance
+    Value: !GetAtt GuideFlow.ContactFlowArn
+  ChatFlowId:
+    Condition: HasChat
+    Value: !Select [3, !Split ["/", !GetAtt ChatFlow.ContactFlowArn]]

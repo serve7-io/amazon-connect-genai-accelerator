@@ -1,0 +1,36 @@
+{
+  "operation": "lookupmember",
+  "path": "/lookupmember",
+  "success": {
+    "request": {
+      "member_id": "M-20481537"
+    },
+    "response": {
+      "found": true,
+      "member_id": "M-20481537",
+      "first_name": "Sarah",
+      "tier": "Plus",
+      "vehicle_spoken": "2023 Honda CR-V",
+      "member_since": "2019",
+      "prior_calls": 1,
+      "last_service": "battery boost, March 2025",
+      "open_cases": 0,
+      "message": "Thanks, Sarah. I found your Plus membership. Is your vehicle the 2023 Honda CR-V?",
+      "agent_note": "Member since 2019. 1 prior roadside call (last: battery boost, March 2025)."
+    }
+  },
+  "error": {
+    "request": {
+      "member_id": "M-99999999"
+    },
+    "response": {
+      "found": false,
+      "error": "member_not_found",
+      "valid_options": [
+        "member_id",
+        "phone"
+      ],
+      "message": "I couldn't find that membership number. Could you check it, or give me the phone number on the account?"
+    }
+  }
+}

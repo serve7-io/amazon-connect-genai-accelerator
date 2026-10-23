@@ -1,0 +1,25 @@
+{
+  "operation": "reset",
+  "path": "/reset",
+  "success": {
+    "request": {
+      "member_id": "M-20481537"
+    },
+    "response": {
+      "ok": true,
+      "member_id": "M-20481537",
+      "removed": 2,
+      "message": "Demo state for M-20481537 restored."
+    }
+  },
+  "error": {
+    "request": {
+      "member_id": "M-99999999"
+    },
+    "response": {
+      "ok": false,
+      "error": "member_not_found",
+      "message": "That member is not in the demo seed."
+    }
+  }
+}
