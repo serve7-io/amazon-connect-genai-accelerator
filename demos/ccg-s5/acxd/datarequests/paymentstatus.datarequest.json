@@ -1,0 +1,124 @@
+{
+  "dataRequestId": "paymentstatus",
+  "type": "object",
+  "webhook": {
+    "version": "v3",
+    "sendContext": true,
+    "implementation": "external",
+    "method": "POST",
+    "environments": {
+      "production": {
+        "url": "https://YOUR-ACXD-API-URL/payment_status",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "dynamic": false,
+            "required": false
+          },
+          {
+            "key": "x-api-key",
+            "value": "{ccg_s5_api_key:NLX.Secret}",
+            "dynamic": false,
+            "required": false
+          }
+        ]
+      }
+    }
+  },
+  "description": "Outcome of this call's payment for a policy: stored card or keypad card entry (after returning from the secure keypad step), and before any retry.",
+  "sensitive": false,
+  "streamStateModifications": false,
+  "requestSchema": {
+    "type": "object",
+    "properties": {
+      "policy_id": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "contact_id": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "Context variable contact_id"
+      }
+    },
+    "isSensitive": false,
+    "title": "",
+    "description": ""
+  },
+  "responseSchema": {
+    "type": "object",
+    "properties": {
+      "result": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "approved, declined, card_expired, invalid_card, gateway_unavailable or none (nothing charged)"
+      },
+      "confirmation": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "brand": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "last4": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "attempts": {
+        "type": "number",
+        "isSensitive": false,
+        "title": "",
+        "description": "Keypad/stored attempts recorded on this call"
+      },
+      "policy_id": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "line_name": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "e.g. home insurance"
+      },
+      "amount_spoken": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "e.g. $1,247"
+      },
+      "next_renewal": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "e.g. October 2027"
+      },
+      "receipt": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "sms_sent or none"
+      }
+    },
+    "isSensitive": false,
+    "title": "",
+    "description": ""
+  },
+  "metadata": {
+    "path": "",
+    "tags": []
+  }
+}

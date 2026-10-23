@@ -1,0 +1,71 @@
+name: auto-ship
+# Opt-in "ship it" pipeline. Push a branch named auto/<anything> as the owner and, without any clicks:
+#   1. the branch is merged into a copy of main and the checks run on the result (demos/_kit/auto_ship.py)
+#   2. if only demos/, docs/ and README.md changed (never demos/ccg-s5) and the checks pass, it is merged into main
+#      and the branch is deleted
+#   3. the changed demos listed in AUTO_DEPLOY are deployed (demo.yml, command "deploy <demo>")
+# Anything else (a merge conflict, files outside the allowed folders, failing checks) is not merged: a pull request is
+# opened for a human (that needs the repo setting "Allow GitHub Actions to create and approve pull requests").
+# The AWS deploy itself runs in demo.yml on main, because the CI role only trusts main.
+# Source copy: demos/_kit/auto-ship.workflow.yml; the live file is .github/workflows/auto-ship.yml and must be identical.
+on:
+  push:
+    branches: ["auto/**"]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: auto-ship
+  cancel-in-progress: false
+
+env:
+  OWNERS: "milosjovanic-serve7"
+  AUTO_DEPLOY: "renault-rental"
+
+jobs:
+  ship:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Only the owner may use auto/ branches
+        env:
+          ACTOR: ${{ github.actor }}
+        run: |
+          case " $OWNERS " in *" $ACTOR "*) ;; *) echo "::error::$ACTOR may not use auto/ branches"; exit 1;; esac
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install -q pytest boto3 cfn-lint pyyaml
+      - name: Merge into main when it is safe
+        id: ship
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python3 demos/_kit/auto_ship.py ship
+      - name: Deploy the changed demos
+        if: steps.ship.outputs.shipped == 'true' && steps.ship.outputs.demos != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEMOS: ${{ steps.ship.outputs.demos }}
+        run: |
+          for d in $DEMOS; do
+            gh workflow run demo.yml --ref main -f command="deploy $d"
+            echo "deploy requested: $d"
+          done
+      - name: Open a pull request for review
+        if: always() && steps.ship.conclusion != 'skipped' && steps.ship.outputs.shipped != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+          REASON: ${{ steps.ship.outputs.reason }}
+        run: |
+          if [ -n "$(gh pr list --head "$BRANCH" --state open --json number -q '.[].number')" ]; then echo "a pull request already exists"; exit 0; fi
+          gh pr create --base main --head "$BRANCH" --title "$BRANCH: needs review" \
+            --body "auto-ship did not merge this branch: ${REASON:-the workflow stopped before it could say why}. See the run log." \
+            || echo "could not open a pull request (enable 'Allow GitHub Actions to create and approve pull requests' in Settings > Actions > General)"

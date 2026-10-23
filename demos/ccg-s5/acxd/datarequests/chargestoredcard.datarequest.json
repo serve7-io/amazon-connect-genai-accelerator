@@ -1,0 +1,124 @@
+{
+  "dataRequestId": "chargestoredcard",
+  "type": "object",
+  "webhook": {
+    "version": "v3",
+    "sendContext": true,
+    "implementation": "external",
+    "method": "POST",
+    "environments": {
+      "production": {
+        "url": "https://YOUR-ACXD-API-URL/charge_stored_card",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "dynamic": false,
+            "required": false
+          },
+          {
+            "key": "x-api-key",
+            "value": "{ccg_s5_api_key:NLX.Secret}",
+            "dynamic": false,
+            "required": false
+          }
+        ]
+      }
+    }
+  },
+  "description": "Charges the renewal to a stored card. Only after a clear yes to the authorization read-back.",
+  "sensitive": false,
+  "streamStateModifications": false,
+  "requestSchema": {
+    "type": "object",
+    "properties": {
+      "member_id": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "policy_id": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "Full policy id from getpolicies"
+      },
+      "token": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "Card token from getpaymentmethods"
+      },
+      "contact_id": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "Context variable contact_id"
+      },
+      "phone": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "Caller's phone number, E.164, for the SMS receipt"
+      }
+    },
+    "isSensitive": false,
+    "title": "",
+    "description": ""
+  },
+  "responseSchema": {
+    "type": "object",
+    "properties": {
+      "result": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "approved, declined, card_expired, already_paid, not_payable, unknown_card, gateway_unavailable"
+      },
+      "confirmation": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "last4": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "brand": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "amount": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "next_renewal": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "e.g. October 2027"
+      },
+      "receipt": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "sent, skipped or failed"
+      }
+    },
+    "isSensitive": false,
+    "title": "",
+    "description": ""
+  },
+  "metadata": {
+    "path": "",
+    "tags": []
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "operation": "coverage",
+  "path": "/coverage",
+  "success": {
+    "request": {
+      "member_id": "M-20481537",
+      "service": "tow",
+      "location": "Highway 401 eastbound near Joyceville Road, Kingston",
+      "safety": "safe, off the road",
+      "spare": "no spare"
+    },
+    "response": {
+      "covered": true,
+      "tier": "Plus",
+      "service": "tow",
+      "tow_km_included": 200,
+      "cost_to_member": 0,
+      "demo_value": false,
+      "location": "Highway 401 eastbound near Joyceville Road, Kingston",
+      "safety": "safe, off the road",
+      "spare": "no spare",
+      "message": "Your Plus membership covers up to 200 km of towing at no charge.",
+      "summary": "Sarah Mitchell, Plus member M-20481537. Vehicle: 2023 Honda CR-V. Location: Highway 401 eastbound near Joyceville Road, Kingston. Safety: safe, off the road. Spare tire: no spare. Needs towing, 200 km covered at no charge."
+    }
+  },
+  "error": {
+    "request": {
+      "member_id": "M-20481537",
+      "service": "helicopter"
+    },
+    "response": {
+      "covered": false,
+      "error": "unknown_service",
+      "valid_options": [
+        "boost",
+        "fuel",
+        "lockout",
+        "tire",
+        "tow"
+      ],
+      "message": "Which service do you need: a tow, a tire change, a battery boost, a lockout or fuel delivery?"
+    }
+  }
+}

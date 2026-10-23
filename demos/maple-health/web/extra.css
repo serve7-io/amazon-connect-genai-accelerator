@@ -1,0 +1,16 @@
+  .mh-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+  .mh-grid .card { margin-bottom: 0; }
+  .mh-grid + .card { margin-top: 20px; }
+  .hint { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+  ul.patients { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  ul.patients li { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; display: grid; }
+  ul.patients span { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  ul.patients em { color: var(--muted); font-size: 13px; font-style: normal; }
+  .pill { font-size: 11px; font-weight: 500; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; color: var(--muted); margin-left: 6px; }
+  ol.mails { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  ol.mails li { border-left: 4px solid var(--accent); background: var(--bg); border-radius: 6px; padding: 8px 12px; }
+  ol.mails .meta { font-size: 12px; color: var(--muted); }
+  ol.mails .subj { font-weight: 600; }
+  ol.mails .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 22px; letter-spacing: 3px; font-weight: 700; }
+  ol.mails li.new { animation: mh-flash 1.2s ease-out; }
+  @keyframes mh-flash { from { box-shadow: 0 0 0 4px var(--accent); } to { box-shadow: none; } }
