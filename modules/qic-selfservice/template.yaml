@@ -180,5 +180,7 @@ Outputs:
     Value: !GetAtt Assistant.AssistantId
   KnowledgeBaseId:
     Value: !GetAtt KnowledgeBase.KnowledgeBaseId
+  KnowledgeBaseArn:
+    Value: !GetAtt KnowledgeBase.KnowledgeBaseArn
   BotAliasArn:
     Value: !GetAtt BotAlias.Arn
