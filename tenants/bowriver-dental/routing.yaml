@@ -1,0 +1,58 @@
+# Bow River Dental routing (fictional demo client). Hours, queues, profiles and patient-facing messages.
+# The inbound flow uses 'business' hours and the 'general' + 'billing' queues (AI route_hint). 'emergencies' is an
+# extra queue for staff; routing urgent chats to it automatically needs the route hints extended.
+hours:
+  business:
+    timezone: America/Edmonton
+    days:
+      MONDAY: ["08:00", "19:00"]
+      TUESDAY: ["08:00", "19:00"]
+      WEDNESDAY: ["08:00", "19:00"]
+      THURSDAY: ["08:00", "19:00"]
+      FRIDAY: ["08:00", "16:00"]
+      SATURDAY: ["09:00", "13:00"]
+  always:
+    timezone: America/Edmonton
+    days:
+      MONDAY: ["00:00", "23:59"]
+      TUESDAY: ["00:00", "23:59"]
+      WEDNESDAY: ["00:00", "23:59"]
+      THURSDAY: ["00:00", "23:59"]
+      FRIDAY: ["00:00", "23:59"]
+      SATURDAY: ["00:00", "23:59"]
+      SUNDAY: ["00:00", "23:59"]
+
+queues:
+  general:
+    hours: business
+    max_contacts: 30
+    description: Front Desk - appointments, new patients, general questions (default queue)
+  billing:
+    hours: business
+    max_contacts: 15
+    description: Billing and insurance (AI route_hint=billing)
+  emergencies:
+    hours: business
+    max_contacts: 10
+    description: Dental emergencies - pain, swelling, bleeding, broken or knocked-out teeth
+
+routing_profiles:
+  front-desk:
+    default_outbound_queue: general
+    media: { VOICE: 1, CHAT: 3, TASK: 2 }
+    queues:
+      - { name: emergencies, priority: 1, delay: 0 }
+      - { name: general, priority: 2, delay: 0 }
+      - { name: billing, priority: 3, delay: 0 }
+
+recording:
+  participants: ["Agent", "Customer"]
+  analytics: true
+  language: en-US
+
+messages:
+  ai_disclosure: "Hello, and thanks for contacting Bow River Dental. You're chatting with our automated assistant, which can't give medical advice. Type 'front desk' at any time to reach a person."
+  closed: "Thanks for contacting Bow River Dental. We're closed right now (Mon-Thu 8-19, Fri 8-16, Sat 9-13 Mountain Time). If you have severe pain, swelling or bleeding, go to the nearest emergency department or call 911."
+  failure: "Sorry, we couldn't connect you right now. Please try again shortly or call the clinic."
+  self_service_prompt: "How can I help today? I can answer questions about our services, insurance, new-patient forms and hours, or check on your appointment."
+  goodbye: "Thanks for contacting Bow River Dental. Take care!"

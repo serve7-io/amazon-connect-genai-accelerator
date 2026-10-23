@@ -95,8 +95,11 @@ module "agent_tools" {
   permissions_boundary_arn = local.boundary_arn
   logs_kms_key_arn         = local.f.kms_logs_arn
   policy_json              = data.aws_iam_policy_document.agent_tools[0].json
-  environment              = { CRM_TABLE = aws_dynamodb_table.crm[0].name }
-  tags                     = { "serve7:component" = "agent-tools", "serve7:genai" = "agentic" }
+  environment = {
+    CRM_TABLE         = aws_dynamodb_table.crm[0].name
+    TICKET_CATEGORIES = join(",", local.agent_cfg.ticket_categories)
+  }
+  tags = { "serve7:component" = "agent-tools", "serve7:genai" = "agentic" }
 }
 
 resource "aws_lambda_permission" "gateway_tools" {

@@ -1,0 +1,63 @@
+# Northwind Motorcycles routing (fictional demo client). Hours, queues, profiles and customer-facing messages.
+# The inbound flow uses 'business' hours and the 'general' + 'billing' queues (AI route_hint). Service and parts
+# are extra queues for agents; routing chats to them automatically needs the route hints extended (see note in README).
+hours:
+  business:
+    timezone: America/Edmonton
+    days:
+      MONDAY: ["09:00", "18:00"]
+      TUESDAY: ["09:00", "18:00"]
+      WEDNESDAY: ["09:00", "18:00"]
+      THURSDAY: ["09:00", "18:00"]
+      FRIDAY: ["09:00", "18:00"]
+      SATURDAY: ["09:00", "14:00"]
+  always:
+    timezone: America/Edmonton
+    days:
+      MONDAY: ["00:00", "23:59"]
+      TUESDAY: ["00:00", "23:59"]
+      WEDNESDAY: ["00:00", "23:59"]
+      THURSDAY: ["00:00", "23:59"]
+      FRIDAY: ["00:00", "23:59"]
+      SATURDAY: ["00:00", "23:59"]
+      SUNDAY: ["00:00", "23:59"]
+
+queues:
+  general:
+    hours: business
+    max_contacts: 30
+    description: Sales - models, test rides, orders (default queue)
+  billing:
+    hours: business
+    max_contacts: 15
+    description: Financing and payments (AI route_hint=billing)
+  service:
+    hours: business
+    max_contacts: 20
+    description: Service bookings, repairs and warranty
+  parts:
+    hours: business
+    max_contacts: 15
+    description: Parts and accessories orders
+
+routing_profiles:
+  advisors:
+    default_outbound_queue: general
+    media: { VOICE: 1, CHAT: 3, TASK: 2 }
+    queues:
+      - { name: general, priority: 1, delay: 0 }
+      - { name: service, priority: 1, delay: 0 }
+      - { name: parts, priority: 2, delay: 0 }
+      - { name: billing, priority: 2, delay: 0 }
+
+recording:
+  participants: ["Agent", "Customer"]
+  analytics: true
+  language: en-US
+
+messages:
+  ai_disclosure: "Hey, thanks for reaching out to Northwind Motorcycles! You're chatting with our automated assistant. Type 'agent' any time to reach a person."
+  closed: "Thanks for contacting Northwind Motorcycles. We're closed right now - we're open Mon-Fri 9-18 and Sat 9-14 Mountain Time. Talk soon!"
+  failure: "Sorry, we couldn't connect you right now. Please try again in a few minutes."
+  self_service_prompt: "What can I help you with? Models, service, warranty, financing, or the status of an order or booking."
+  goodbye: "Thanks for chatting with Northwind Motorcycles. Ride safe!"

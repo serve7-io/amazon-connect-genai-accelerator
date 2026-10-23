@@ -1,0 +1,6 @@
+# Sandbox - self-service AI agent settings. Read by stacks/40-genai/agent.tf; see templates/tenant/agent.yaml.
+company: "Serve7 Sandbox"
+assistant_name: ""
+persona: ""                 # empty: AWS-managed orchestration prompt (current demo behaviour)
+customer_id_example: C1001
+ticket_categories: [billing, technical, order, account, other]

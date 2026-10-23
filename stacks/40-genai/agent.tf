@@ -22,8 +22,91 @@ variable "ai_agent_profile_permissions" {
   default     = ["Wisdom.View"]
 }
 
+# Per-tenant behaviour of the agent comes from tenants/<tenant>/agent.yaml (see templates/tenant/agent.yaml).
+# Without that file the agent behaves as before (AWS-managed prompt, generic examples).
 locals {
   ai_agent = local.agentic && var.enable_ai_agent && var.enable_self_service
+
+  agent_yaml_path = "${path.module}/../../tenants/${var.tenant}/agent.yaml"
+  agent_yaml      = try(yamldecode(file(local.agent_yaml_path)), {})
+  agent_cfg = {
+    company             = try(tostring(local.agent_yaml.company), "")
+    assistant_name      = try(tostring(local.agent_yaml.assistant_name), "")
+    persona             = trimspace(try(tostring(local.agent_yaml.persona), ""))
+    customer_id_example = try(tostring(local.agent_yaml.customer_id_example), "C1001")
+    ticket_categories   = try([for c in local.agent_yaml.ticket_categories : lower(tostring(c))], ["billing", "technical", "order", "account", "other"])
+  }
+
+  # A persona needs the tenant's own orchestration prompt: the AWS-managed prompt text (fetched once with
+  # scripts/fetch-orchestration-prompt.py into the module) with the persona put where the marker is.
+  base_prompt_path = "${path.module}/../../modules/ai-selfservice-agent/prompts/orchestration-chat.base.json"
+  base_prompt      = try(jsondecode(file(local.base_prompt_path)), null)
+  custom_prompt    = local.ai_agent && local.agent_cfg.persona != "" && local.base_prompt != null
+  persona_block = join("\n", [
+    for l in split("\n", join("\n", compact([
+      local.agent_cfg.company != "" ? "You are the customer service assistant of ${local.agent_cfg.company}${local.agent_cfg.assistant_name != "" ? ", named ${local.agent_cfg.assistant_name}" : ""}." : "",
+      local.agent_cfg.persona,
+    ]))) : "${try(local.base_prompt.indent, "")}${l}"
+  ])
+  prompt_text = local.custom_prompt ? try(replace(local.base_prompt.text, local.base_prompt.marker, local.persona_block), "") : ""
+}
+
+check "agent_persona_ready" {
+  assert {
+    condition     = local.agent_cfg.persona == "" || local.base_prompt != null
+    error_message = "tenants/${var.tenant}/agent.yaml has a persona, but modules/ai-selfservice-agent/prompts/orchestration-chat.base.json is missing (run scripts/fetch-orchestration-prompt.py). The agent keeps the AWS-managed prompt."
+  }
+  assert {
+    condition     = !strcontains(local.agent_cfg.persona, "{{")
+    error_message = "agent.yaml persona must not contain '{{' (reserved for prompt variables)."
+  }
+}
+
+# The tenant's orchestration prompt + a published version (new version whenever the text changes).
+resource "aws_cloudformation_stack" "ai_agent_prompt" {
+  count      = local.custom_prompt ? 1 : 0
+  name       = "${local.prefix}-ai-agent-prompt"
+  on_failure = "ROLLBACK"
+  template_body = jsonencode({
+    AWSTemplateFormatVersion = "2010-09-09"
+    Description              = "Serve7 accelerator - tenant orchestration prompt for the self-service AI agent (stacks/40-genai/agent.tf)"
+    Resources = {
+      Prompt = {
+        Type = "AWS::Wisdom::AIPrompt"
+        Properties = {
+          AssistantId           = aws_cloudformation_stack.self_service[0].outputs["AssistantId"]
+          Name                  = "${local.prefix}-orchestration"
+          Description           = "AWS SelfServiceOrchestrationChat + ${local.agent_cfg.company} persona"
+          Type                  = "ORCHESTRATION"
+          ApiFormat             = try(local.base_prompt.api_format, "")
+          ModelId               = try(local.base_prompt.model_id, "")
+          TemplateType          = "TEXT"
+          TemplateConfiguration = { TextFullAIPromptEditTemplateConfiguration = { Text = local.prompt_text } }
+        }
+      }
+      PromptVersion = {
+        Type                = "AWS::Wisdom::AIPromptVersion"
+        DeletionPolicy      = "Retain"
+        UpdateReplacePolicy = "Retain"
+        Properties = {
+          AssistantId         = aws_cloudformation_stack.self_service[0].outputs["AssistantId"]
+          AIPromptId          = { "Fn::GetAtt" = ["Prompt", "AIPromptId"] }
+          ModifiedTimeSeconds = { "Fn::GetAtt" = ["Prompt", "ModifiedTimeSeconds"] }
+        }
+      }
+    }
+    Outputs = {
+      PromptVersionRef = {
+        Value = { "Fn::Join" = [":", [{ "Fn::GetAtt" = ["Prompt", "AIPromptId"] }, { "Fn::GetAtt" = ["PromptVersion", "VersionNumber"] }]] }
+      }
+    }
+  })
+
+  tags = { "serve7:component" = "ai-agent", "serve7:genai" = "agentic" }
+
+  lifecycle {
+    ignore_changes = [tags, tags_all]
+  }
 }
 
 resource "aws_cloudformation_stack" "ai_agent" {
@@ -38,7 +121,9 @@ resource "aws_cloudformation_stack" "ai_agent" {
     AssistantId           = aws_cloudformation_stack.self_service[0].outputs["AssistantId"]
     GatewayId             = aws_cloudformation_stack.agent_tools_gateway[0].outputs["GatewayId"]
     GatewayUrl            = aws_cloudformation_stack.agent_tools_gateway[0].outputs["GatewayUrl"]
-    OrchestrationPromptId = var.ai_agent_orchestration_prompt_id
+    OrchestrationPromptId = local.custom_prompt ? aws_cloudformation_stack.ai_agent_prompt[0].outputs["PromptVersionRef"] : var.ai_agent_orchestration_prompt_id
+    CustomerIdExample     = local.agent_cfg.customer_id_example
+    TicketCategories      = join(", ", local.agent_cfg.ticket_categories)
     ProfilePermissions    = join(",", var.ai_agent_profile_permissions)
     Locale                = var.self_service_locale
   }
@@ -56,6 +141,11 @@ output "ai_agent_id" {
 
 output "ai_agent_arn" {
   value = try(aws_cloudformation_stack.ai_agent[0].outputs["AgentArn"], "")
+}
+
+output "ai_agent_prompt" {
+  description = "Orchestration prompt the agent uses (tenant prompt id:version, or the AWS-managed one)."
+  value       = local.custom_prompt ? try(aws_cloudformation_stack.ai_agent_prompt[0].outputs["PromptVersionRef"], "") : var.ai_agent_orchestration_prompt_id
 }
 
 output "ai_agent_security_profile_arn" {

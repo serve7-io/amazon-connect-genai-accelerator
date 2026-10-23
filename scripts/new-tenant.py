@@ -4,7 +4,8 @@
     python3 scripts/new-tenant.py --tenant client-demo --account-id 123456789012 --region ca-central-1 \
         --company "Client Demo Inc" --owner-email ops@example.com [--timezone America/Toronto] [--country CA]
 
-Creates tenants/<tenant>/{tenant.yaml, dev.tfvars, routing.yaml, knowledge/faq.txt}. Never overwrites.
+Creates tenants/<tenant>/{tenant.yaml, dev.tfvars, routing.yaml, agent.yaml, demo-crm.json, knowledge/faq.txt}.
+Never overwrites.
 Next steps are printed at the end (bootstrap + deploy) - see docs/runbook-new-tenant.md.
 """
 from __future__ import annotations
@@ -113,6 +114,8 @@ environments:
     print(f"""
 Next (see docs/runbook-new-tenant.md):
   1. Review tenants/{a.tenant}/routing.yaml (hours, queues, messages) and replace knowledge/faq.txt.
+     For the AI agent: set enable_agentic_tools = true in dev.tfvars, write agent.yaml (persona) and
+     demo-crm.json (fictional customers and orders that fit the client).
   2. Get credentials for account {a.account_id} (e.g. eval "$(scripts/assume-tenant.sh {a.account_id})").
   3. GITHUB_SUBJECT_PREFIX=... AUTO_APPROVE=1 ./scripts/deploy.sh {a.tenant} dev
   4. python3 tests/smoke.py --tenant {a.tenant}

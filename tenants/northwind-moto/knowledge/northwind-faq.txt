@@ -1,0 +1,29 @@
+Northwind Motorcycles - Customer FAQ (demo content)
+Fictional dealership used for a Serve7 demo. Models, policies and hours below are invented demo values.
+
+Opening hours
+The showroom, service centre and parts counter are open Monday to Friday from 9:00 to 18:00 and Saturday from 9:00 to 14:00, Mountain Time (Calgary). We are closed on Sundays and statutory holidays. The chat assistant is available 24/7; people answer chats during opening hours.
+
+Where we are
+Northwind Motorcycles is a motorcycle dealership in Calgary, Alberta. Test rides start from the showroom and need a valid motorcycle licence and your own helmet and riding gear.
+
+Models we carry
+We sell new and pre-owned motorcycles in four ranges. Northwind Trail: adventure bikes for gravel and long trips. Northwind Street: naked and sport bikes for city riding. Northwind Cruiser: low seat, relaxed touring. Northwind Volt: electric commuters with home charging. Ask the sales team for current stock, colours and test-ride availability. The assistant cannot quote prices; a sales advisor will give you a written quote.
+
+Service intervals
+New bikes get a first service at 1,000 km. After that, service every 6,000 km or once a year, whichever comes first. Electric Volt models need a yearly inspection instead of oil changes. Book a service by chat, by phone, or at the service desk; bring your bike's service book.
+
+Warranty
+New motorcycles have a 2-year manufacturer warranty with unlimited kilometres. Pre-owned bikes from Northwind come with a 6-month dealer warranty on the engine and transmission. Warranty work needs the service intervals to have been kept. Wear parts such as tyres, brake pads and chains are not covered. The service team decides whether a repair is covered after inspecting the bike.
+
+Financing
+Financing is available through our lending partners, subject to credit approval. Terms and rates depend on the bike and your application, so the assistant cannot quote them; the sales team will go through options with you. Trade-ins are accepted and valued in person.
+
+Orders and service bookings
+You can ask the assistant for the status of a bike order, a parts order or a service booking. Have your customer number, email or phone number ready so we can find your account.
+
+Parts and accessories
+The parts counter orders genuine Northwind parts, helmets and riding gear. Special-order parts usually arrive in 3 to 7 business days; we contact you when they arrive.
+
+Talking to a person
+You can ask for a person at any time by typing "agent" or "talk to a person". During opening hours we connect you to sales, service or parts.

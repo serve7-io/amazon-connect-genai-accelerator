@@ -6,6 +6,7 @@ tfvars agree with tenant.yaml, routing.yaml references valid hours/queues, no le
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -106,6 +107,29 @@ for d in tenants:
     for m in ("ai_disclosure", "closed", "failure"):
         if not (r.get("messages") or {}).get(m):
             err(name, f"routing.yaml messages.{m} is required")
+
+    # optional: AI agent settings (stacks/40-genai/agent.tf) and fictional demo CRM data (seed-demo-crm.py)
+    if (d / "agent.yaml").exists():
+        ag = yaml.safe_load((d / "agent.yaml").read_text()) or {}
+        unknown = set(ag) - {"company", "assistant_name", "persona", "customer_id_example", "ticket_categories"}
+        if unknown:
+            err(name, f"agent.yaml has unknown keys {sorted(unknown)}")
+        persona = str(ag.get("persona") or "")
+        if len(persona) > 3000:
+            err(name, f"agent.yaml persona is {len(persona)} chars; keep it under 3000")
+        cats = ag.get("ticket_categories", [])
+        if not isinstance(cats, list) or not all(re.fullmatch(r"[a-z][a-z0-9_-]{1,30}", str(c)) for c in cats):
+            err(name, "agent.yaml ticket_categories must be a list of short lowercase words")
+    if (d / "demo-crm.json").exists():
+        try:
+            crm = json.loads((d / "demo-crm.json").read_text())
+            first = crm["customers"][0]
+            assert first["orders"][0]["order_id"] and first["phone"] and first["customer_id"]
+            for c in crm["customers"]:
+                if not re.fullmatch(r"\+1\d{3}55501\d{2}", c["phone"]) or not c["email"].endswith("@example.com"):
+                    err(name, f"demo-crm.json {c['customer_id']}: use fictional contacts (+1NPA55501xx, @example.com)")
+        except (ValueError, KeyError, IndexError, AssertionError, TypeError) as e:
+            err(name, f"demo-crm.json needs customers[0] with customer_id, phone and one order ({e!r})")
 
 print(f"checked {len(tenants)} tenant(s): {', '.join(p.name for p in tenants)}")
 if errors:

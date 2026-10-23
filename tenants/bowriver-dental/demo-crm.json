@@ -1,0 +1,35 @@
+{
+  "_comment": "Fictional demo patients for Bow River Dental (Serve7 demo). 555-01xx numbers and example.com addresses are reserved for fiction. No real health data. tests/smoke.py uses the first patient and its first item.",
+  "customers": [
+    {
+      "customer_id": "BR1001", "first_name": "Maya", "last_name": "Thompson", "tier": "family plan",
+      "phone": "+14035550121", "email": "maya.thompson@example.com",
+      "orders": [
+        { "order_id": "A5001", "item": "Check-up and cleaning - Kensington", "status": "confirmed for Oct 14, 9:30", "eta": "2026-10-14" },
+        { "order_id": "A5002", "item": "Child check-up (Leo) - Kensington", "status": "confirmed for Oct 14, 10:30", "eta": "2026-10-14" }
+      ]
+    },
+    {
+      "customer_id": "BR1002", "first_name": "Daniel", "last_name": "Cho", "tier": "standard",
+      "phone": "+14035550122", "email": "daniel.cho@example.com",
+      "orders": [
+        { "order_id": "T6001", "item": "Treatment plan: crown, upper left molar", "status": "pre-treatment estimate sent to insurer, waiting for reply", "eta": "2026-10-20" }
+      ]
+    },
+    {
+      "customer_id": "BR1003", "first_name": "Fatima", "last_name": "Haddad", "tier": "new patient",
+      "phone": "+14035550123", "email": "fatima.haddad@example.com",
+      "orders": [
+        { "order_id": "A5003", "item": "New-patient exam - Inglewood", "status": "booked for Oct 16, 15:00; new-patient form not received yet", "eta": "2026-10-16" }
+      ]
+    },
+    {
+      "customer_id": "BR1004", "first_name": "George", "last_name": "Whitfield", "tier": "standard",
+      "phone": "+14035550124", "email": "george.whitfield@example.com",
+      "orders": [
+        { "order_id": "A5004", "item": "Whitening consultation - Inglewood", "status": "waitlisted, first opening Oct 22", "eta": "2026-10-22" },
+        { "order_id": "T6002", "item": "Treatment plan: night guard", "status": "approved, lab order placed", "eta": "2026-10-28" }
+      ]
+    }
+  ]
+}
