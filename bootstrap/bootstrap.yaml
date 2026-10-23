@@ -8,7 +8,7 @@ Description: >-
 Parameters:
   GitHubOrg:
     Type: String
-    Default: serve7
+    Default: serve7-io
   GitHubRepo:
     Type: String
     Default: amazon-connect-genai-accelerator
@@ -35,7 +35,9 @@ Parameters:
     Type: String
     Default: environment
     AllowedValues: [environment, main-branch]
-    Description: environment = trust GitHub environment Tenant-Environment; main-branch = trust refs/heads/main (free private repos)
+    Description: >-
+      environment = deploy role trusts only the GitHub environment <Tenant>-<Environment> (needs GitHub Pro/Team
+      for private repos). main-branch = trusts workflow runs on refs/heads/main (free private repos).
   CreateCloudTrail:
     Type: String
     Default: "true"
@@ -378,6 +380,12 @@ Resources:
                       - app-integrations.amazonaws.com
                       - profile.amazonaws.com
                       - cases.amazonaws.com
+              # Associating integrations (MCP servers, Lex, Lambda) makes Connect add inline policies to its own
+              # service-linked role on the caller's behalf. Scoped to that role path; only Connect can assume it.
+              - Sid: ConnectServiceLinkedRolePolicies
+                Effect: Allow
+                Action: [iam:PutRolePolicy, iam:DeleteRolePolicy, iam:AttachRolePolicy, iam:DetachRolePolicy]
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/connect.amazonaws.com/*"
               - Sid: ProtectBootstrap
                 Effect: Deny
                 NotAction: [iam:Get*, iam:List*]
