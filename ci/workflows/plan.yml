@@ -1,0 +1,92 @@
+name: plan
+# Terraform plan on every PR touching infrastructure, with the read-only serve7-plan role (OIDC), for the tenants in the
+# repository variable CI_TENANTS (default: DEFAULT_TENANT, else sandbox). AWS_CI=false skips it until the account is
+# bootstrapped. See docs/setup-new-org.md. Source copy: ci/workflows/plan.yml (install with scripts/install-workflows.sh).
+on:
+  pull_request:
+    paths: ["stacks/**", "modules/**", "flows/**", "lambdas/**", "tenants/**", "scripts/**", ".github/workflows/**"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: plan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tenants:
+    runs-on: ubuntu-24.04
+    if: vars.AWS_CI != 'false'
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+      count: ${{ steps.m.outputs.count }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -q pyyaml
+      - name: Tenants to plan
+        id: m
+        env:
+          CI_TENANTS: ${{ vars.CI_TENANTS }}
+          DEFAULT_TENANT: ${{ vars.DEFAULT_TENANT }}
+          DEFAULT_ENV: ${{ vars.DEFAULT_ENV }}
+        run: python scripts/ci-tenants.py --github >> "$GITHUB_OUTPUT"
+
+  plan:
+    needs: tenants
+    if: needs.tenants.outputs.count != '0'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.tenants.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -q boto3 pyyaml
+
+      - name: Resolve tenant
+        id: t
+        run: |
+          python scripts/tenant-info.py ${{ matrix.tenant }} ${{ matrix.env }} --github >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::${{ steps.t.outputs.account }}:role/serve7-plan
+          aws-region: ${{ steps.t.outputs.region }}
+          role-session-name: gh-plan-${{ github.run_id }}
+
+      - name: Plan all layers (read-only)
+        run: PLAN_ONLY=1 RELEASE=main ./scripts/deploy.sh ${{ matrix.tenant }} ${{ matrix.env }}
+
+      - name: Summarise plan on the PR
+        if: github.event_name == 'pull_request'
+        run: |
+          {
+            echo "### Terraform plan: ${{ matrix.tenant }}/${{ matrix.env }}"
+            for f in plan-*.txt; do
+              echo "- **${f#plan-}**: $(grep -E '^(Plan:|No changes)' "$f" | head -1)"
+            done
+          } > summary.md
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+          gh pr comment ${{ github.event.pull_request.number }} --body-file summary.md --edit-last || \
+            gh pr comment ${{ github.event.pull_request.number }} --body-file summary.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: plan-${{ matrix.tenant }}-${{ matrix.env }}
+          path: plan-*.txt
+          retention-days: 30
