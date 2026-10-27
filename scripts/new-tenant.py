@@ -80,7 +80,7 @@ def main() -> None:
     }
     written = []
     for src in sorted(TEMPLATE.rglob("*")):
-        if src.is_dir():
+        if src.is_dir() or src.name.endswith(".example"):  # opt-in files, copied by hand when needed
             continue
         if src.name.endswith(".optional"):
             if not a.prod_account_id:
