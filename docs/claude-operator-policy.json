@@ -1,0 +1,77 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "NoAccountOrOrganizationChanges",
+      "Effect": "Deny",
+      "Action": [
+        "organizations:CloseAccount",
+        "organizations:RemoveAccountFromOrganization",
+        "organizations:LeaveOrganization",
+        "organizations:DeleteOrganization",
+        "organizations:CreateAccount",
+        "account:CloseAccount",
+        "account:PutAlternateContact",
+        "account:DeleteAlternateContact",
+        "account:PutContactInformation",
+        "account:EnableRegion",
+        "account:DisableRegion"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "NoIdentityCenterChanges",
+      "Effect": "Deny",
+      "Action": [
+        "sso:Create*", "sso:Delete*", "sso:Update*", "sso:Put*", "sso:Attach*", "sso:Detach*", "sso:Provision*",
+        "sso-directory:*",
+        "identitystore:Create*", "identitystore:Delete*", "identitystore:Update*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "NoAuditTrailTampering",
+      "Effect": "Deny",
+      "Action": [
+        "cloudtrail:StopLogging",
+        "cloudtrail:DeleteTrail",
+        "cloudtrail:UpdateTrail",
+        "cloudtrail:PutEventSelectors",
+        "cloudtrail:PutInsightSelectors"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "NoLongLivedHumanCredentials",
+      "Effect": "Deny",
+      "Action": [
+        "iam:CreateUser",
+        "iam:CreateAccessKey",
+        "iam:UpdateAccessKey",
+        "iam:CreateLoginProfile",
+        "iam:UpdateLoginProfile",
+        "iam:CreateServiceSpecificCredential",
+        "iam:UploadSSHPublicKey",
+        "iam:EnableMFADevice",
+        "iam:DeactivateMFADevice"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "NoBillingOrPaymentChanges",
+      "Effect": "Deny",
+      "Action": [
+        "aws-portal:Modify*",
+        "billing:Put*",
+        "billing:Update*",
+        "payments:*",
+        "tax:Put*",
+        "tax:Update*",
+        "purchase-orders:*",
+        "savingsplans:CreateSavingsPlan",
+        "ec2:PurchaseReservedInstancesOffering"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

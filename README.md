@@ -3,6 +3,9 @@
 Terraform + GitHub Actions framework that stands up Amazon Connect with a guarded Amazon Bedrock
 layer in a fresh AWS account. Design and rationale: see the Implementation Guide (claude.ai doc).
 
+**Using it from another GitHub org or AWS account?** Start with [docs/setup-new-org.md](docs/setup-new-org.md), then run
+`python3 scripts/org-setup.py check --aws`.
+
 ## Layout
 | Path | What |
 |---|---|
@@ -18,9 +21,11 @@ layer in a fresh AWS account. Design and rationale: see the Implementation Guide
 | `lambdas/agent_tools` | MCP tools behind the AgentCore Gateway: `customer_lookup`, `retrieve_status`, `create_support_ticket` (+ unit tests) |
 | `tenants/<tenant>/` | All per-client config: `tenant.yaml`, `<env>.tfvars`, `routing.yaml`, `knowledge/` (sandbox also has `demo-crm.json`) |
 | `templates/tenant/` | Scaffold used by `scripts/new-tenant.py` |
-| `scripts/` | `deploy.sh`, `destroy.sh`, `preflight.py`, `new-tenant.py`, `check-tenants.py`, `tenant-info.py`, `sync-knowledge.py`, `validate-flow.py`, `configure-ai-agent.py`, `seed-demo-crm.py`, `adopt-instance.sh`, `assume-tenant.sh` |
+| `scripts/` | `deploy.sh`, `destroy.sh`, `preflight.py`, `new-tenant.py`, `check-tenants.py`, `tenant-info.py`, `sync-knowledge.py`, `validate-flow.py`, `configure-ai-agent.py`, `seed-demo-crm.py`, `adopt-instance.sh`, `assume-tenant.sh`; new-org tooling: `org-setup.py` (readiness check, GitHub variables), `ci-tenants.py` (which tenants CI plans/deploys), `install-workflows.sh` |
+| `ci/workflows/` | Reviewed sources of `deploy.yml`, `plan.yml`, `validate.yml`; a person installs them into `.github/workflows/` (`scripts/install-workflows.sh`) |
 | `tests/smoke.py` | Post-deploy checks |
 | `docs/runbook-new-tenant.md` | Onboarding a new client tenant, step by step |
+| `docs/setup-new-org.md` | Running the accelerator from another GitHub org / AWS account (person + Claude), incl. `claude-operator-policy.json` |
 | `cloudformation/connect-phase1/` | Standalone single-stack Connect instance (deploy / verify / tear down with `phase1.sh`), independent of the Terraform layers |
 | `demos/` | Self-contained client demos, deployed separately from the tenant layers (see [Demos](#demos)) |
 
@@ -39,6 +44,8 @@ Apply order: **10 → 20 → 40 → 30 → 50** (flows need the gateway ARN).
 
 Options: `CLAIM_PHONE=false` (skip the phone number), `INSTANCE_ALIAS=my-alias`, `ONLY=30-routing` (one layer),
 `CREATE_TRAIL=false` (if an Organizations trail already exists).
+A zip has no git remote: on an account's **first** bootstrap add `GITHUB_ORG=<org> GITHUB_REPO=<repo>` so CI trusts the
+right repo (`deploy.sh` stops and says so otherwise).
 
 ### Bedrock model access
 `preflight.py` picks the first invokable model from `model_preference` in `tenant.yaml`.
@@ -54,14 +61,19 @@ Anthropic models need the one-time use-case form in the Bedrock console; Amazon 
 | `ccg-s5.yml` | issue titled `ccg-s5: <command>` / manual / PR or push touching `demos/ccg-s5/**` | demo CI role | tests, deploy and day-to-day operations for the CCG Scenario 5 demo |
 | `auto-ship.yml` | push of a branch named `auto/**` by the owner | `GITHUB_TOKEN` only (the deploy itself runs in `demo.yml`) | merges the branch into `main` when it only touches `demos/` (not `ccg-s5`), `docs/` or `README.md` and all demo/kit checks pass, deletes the branch, then dispatches `demo.yml deploy <demo>` for changed demos in `AUTO_DEPLOY`; anything else gets a review PR |
 
-One-time GitHub setup: create environment `sandbox-dev` (Settings → Environments); add required reviewers for `*-prod`.
-The OIDC trust in `bootstrap.yaml` only accepts that environment for deploys.
+One-time GitHub setup: create environment `<tenant>-<env>` (Settings → Environments); add required reviewers for `*-prod`.
+The OIDC trust in `bootstrap.yaml` only accepts that environment for deploys (or `main` with `DEPLOY_TRUST=main-branch`).
+
+Once the workflows from `ci/workflows/` are installed, repository variables pick the tenants (no workflow edits):
+`DEFAULT_TENANT` / `DEFAULT_ENV` or `CI_TENANTS` (default `sandbox/dev`), `USE_ENVIRONMENTS=false` for free private repos,
+`AWS_CI=false` to skip AWS jobs until an account is bootstrapped. Details: [docs/setup-new-org.md](docs/setup-new-org.md).
 
 ## Local checks
 ```bash
 python3 -m pytest -q lambdas/genai_gateway/tests lambdas/agent_tools/tests
 python3 -m pytest -q cloudformation/connect-phase1/tests
 python3 scripts/check-tenants.py
+python3 -m pytest -q tests/unit
 for s in stacks/*/; do [ "$s" = "stacks/_shared/" ] && continue; terraform -chdir=$s init -backend=false && terraform -chdir=$s validate; done
 cfn-lint bootstrap/bootstrap.yaml modules/*/template.yaml cloudformation/*/template.yaml
 ```
