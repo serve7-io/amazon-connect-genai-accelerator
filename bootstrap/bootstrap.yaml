@@ -262,6 +262,12 @@ Resources:
               - connect:List*
               - connect:StartTaskContact
               - connect:UpdateContactAttributes
+              # Data Table Manager Lambda (layer 30): create tables/attributes, write values. Its own role policy
+              # narrows these to the tenant's Connect instance.
+              - connect:CreateDataTable
+              - connect:CreateDataTableAttribute
+              - connect:BatchCreateDataTableValue
+              - connect:BatchUpdateDataTableValue
               - wisdom:*
               - polly:SynthesizeSpeech
               - comprehend:DetectSentiment
