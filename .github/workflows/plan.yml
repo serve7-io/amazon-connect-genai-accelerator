@@ -1,5 +1,7 @@
 name: plan
-# Terraform plan for the sandbox tenant on every PR, with the read-only serve7-plan role (OIDC).
+# Terraform plan on every PR touching infrastructure, with the read-only serve7-plan role (OIDC), for the tenants in the
+# repository variable CI_TENANTS (default: DEFAULT_TENANT, else sandbox). AWS_CI=false skips it until the account is
+# bootstrapped. See docs/setup-new-org.md. Source copy: ci/workflows/plan.yml (install with scripts/install-workflows.sh).
 on:
   pull_request:
     paths: ["stacks/**", "modules/**", "flows/**", "lambdas/**", "tenants/**", "scripts/**", ".github/workflows/**"]
@@ -15,13 +17,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  tenants:
+    runs-on: ubuntu-24.04
+    if: vars.AWS_CI != 'false'
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+      count: ${{ steps.m.outputs.count }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -q pyyaml
+      - name: Tenants to plan
+        id: m
+        env:
+          CI_TENANTS: ${{ vars.CI_TENANTS }}
+          DEFAULT_TENANT: ${{ vars.DEFAULT_TENANT }}
+          DEFAULT_ENV: ${{ vars.DEFAULT_ENV }}
+        run: python scripts/ci-tenants.py --github >> "$GITHUB_OUTPUT"
+
   plan:
+    needs: tenants
+    if: needs.tenants.outputs.count != '0'
     runs-on: ubuntu-24.04
     strategy:
-      matrix:
-        include:
-          - tenant: sandbox
-            env: dev
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.tenants.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v4
