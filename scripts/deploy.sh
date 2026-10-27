@@ -6,6 +6,9 @@
 #   AUTO_APPROVE=1 ./scripts/deploy.sh sandbox dev
 #   ONLY=30-routing ./scripts/deploy.sh sandbox dev
 #   CLAIM_PHONE=false ./scripts/deploy.sh sandbox dev
+#   REBOOTSTRAP=1 ./scripts/deploy.sh sandbox dev     # re-apply bootstrap/bootstrap.yaml (e.g. boundary changes)
+#   RETRUST=1 ./scripts/deploy.sh sandbox dev         # repo moved/copied to another GitHub org: re-point the CI trust
+#   GITHUB_ORG=acme GITHUB_REPO=connect-acc DEPLOY_TRUST=main-branch ./scripts/deploy.sh acme dev   # first bootstrap, explicit
 set -euo pipefail
 
 TENANT="${1:?usage: deploy.sh <tenant> <env>}"
@@ -59,27 +62,39 @@ fi
 
 # ------------------------------------------------------------------ bootstrap (E1)
 if [[ -z "${ONLY:-}" && "${PLAN_ONLY:-0}" != "1" ]]; then
-  if ! aws cloudformation describe-stacks --stack-name serve7-bootstrap >/dev/null 2>&1 || [[ "${REBOOTSTRAP:-0}" == "1" ]]; then
+  if ! aws cloudformation describe-stacks --stack-name serve7-bootstrap >/dev/null 2>&1 || [[ "${REBOOTSTRAP:-0}" == "1" || "${RETRUST:-0}" == "1" ]]; then
     say "Deploying bootstrap stack (OIDC trust, deploy/plan roles, boundary, state bucket, CloudTrail)"
     # Decide CreateOidcProvider only on first creation; on REBOOTSTRAP keep the stack's own value,
     # otherwise the stack-owned provider would be seen as "external" and deleted.
     OIDC_ARG=()
-    if ! aws cloudformation describe-stacks --stack-name serve7-bootstrap >/dev/null 2>&1; then
+    FIRST_BOOTSTRAP=0
+    aws cloudformation describe-stacks --stack-name serve7-bootstrap >/dev/null 2>&1 || FIRST_BOOTSTRAP=1
+    if [[ "$FIRST_BOOTSTRAP" == "1" ]]; then
       OIDC=true
       aws iam list-open-id-connect-providers --query 'OpenIDConnectProviderList[].Arn' --output text | grep -q token.actions.githubusercontent.com && OIDC=false
       OIDC_ARG=(CreateOidcProvider="$OIDC")
-      # GitHub trust for CI: derived from the git remote unless set explicitly.
+    fi
+    # GitHub trust for CI: derived from the git remote unless set explicitly. Done on first creation, and on
+    # RETRUST=1 (repo moved to another org/name: re-points the deploy/plan roles at the new repo).
+    if [[ "$FIRST_BOOTSTRAP" == "1" || "${RETRUST:-0}" == "1" ]]; then
       ORIGIN="$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)"
       if [[ "$ORIGIN" =~ github.com[:/]([^/]+)/([^/.]+) ]]; then
         GITHUB_ORG="${GITHUB_ORG:-${BASH_REMATCH[1]}}"; GITHUB_REPO="${GITHUB_REPO:-${BASH_REMATCH[2]}}"
       fi
-      if [[ -z "${GITHUB_SUBJECT_PREFIX:-}" && -n "${GITHUB_ORG:-}" ]] && command -v gh >/dev/null; then
+      if [[ -z "${GITHUB_ORG:-}" || -z "${GITHUB_REPO:-}" ]]; then
+        echo "ERROR: cannot tell which GitHub repo CI runs from (no github.com 'origin' remote, e.g. an uploaded zip)." >&2
+        echo "       Set it explicitly: GITHUB_ORG=<org> GITHUB_REPO=<repo> ./scripts/deploy.sh $TENANT $ENVIRONMENT" >&2
+        exit 1
+      fi
+      if [[ -z "${GITHUB_SUBJECT_PREFIX+x}" ]] && command -v gh >/dev/null; then
         GITHUB_SUBJECT_PREFIX="$(gh api "repos/${GITHUB_ORG}/${GITHUB_REPO}/actions/oidc/customization/sub" --jq '.sub_claim_prefix // ""' 2>/dev/null || true)"
       fi
+      say "GitHub trust: ${GITHUB_ORG}/${GITHUB_REPO}${GITHUB_SUBJECT_PREFIX:+ (subject prefix ${GITHUB_SUBJECT_PREFIX})}"
     fi
     [[ -n "${GITHUB_ORG:-}" ]] && OIDC_ARG+=(GitHubOrg="$GITHUB_ORG")
     [[ -n "${GITHUB_REPO:-}" ]] && OIDC_ARG+=(GitHubRepo="$GITHUB_REPO")
-    [[ -n "${GITHUB_SUBJECT_PREFIX:-}" ]] && OIDC_ARG+=(GitHubSubjectPrefix="$GITHUB_SUBJECT_PREFIX")
+    # On RETRUST an empty prefix is passed on purpose: it clears an old immutable-subject prefix of the previous owner.
+    if [[ -n "${GITHUB_SUBJECT_PREFIX:-}" || "${RETRUST:-0}" == "1" ]]; then OIDC_ARG+=(GitHubSubjectPrefix="${GITHUB_SUBJECT_PREFIX:-}"); fi
     [[ -n "${DEPLOY_TRUST:-}" ]] && OIDC_ARG+=(DeployTrust="$DEPLOY_TRUST")
     TRAIL="${CREATE_TRAIL:-true}"
     aws cloudformation deploy \
