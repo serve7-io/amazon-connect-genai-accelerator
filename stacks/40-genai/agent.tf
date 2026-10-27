@@ -78,8 +78,8 @@ resource "aws_cloudformation_stack" "ai_agent_prompt" {
           Name                  = "${local.prefix}-orchestration"
           Description           = "AWS SelfServiceOrchestrationChat + ${local.agent_cfg.company} persona"
           Type                  = "ORCHESTRATION"
-          ApiFormat             = local.base_prompt.api_format
-          ModelId               = local.base_prompt.model_id
+          ApiFormat             = try(local.base_prompt.api_format, "")
+          ModelId               = try(local.base_prompt.model_id, "")
           TemplateType          = "TEXT"
           TemplateConfiguration = { TextFullAIPromptEditTemplateConfiguration = { Text = local.prompt_text } }
         }

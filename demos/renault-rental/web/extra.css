@@ -1,0 +1,22 @@
+  .hint { color: var(--muted); font-size: 14px; margin: 0 0 14px; }
+  .fleet { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+  .car { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; transition: border-color .2s, box-shadow .2s, transform .2s; }
+  .car h3 { margin: 0 0 4px; font-size: 16px; }
+  .car .meta { margin: 0; font-size: 13px; color: var(--muted); }
+  .car .price { margin: 8px 0 2px; }
+  .car .price span { display: block; font-size: 12px; color: var(--muted); }
+  .car .note { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+  .car.hl { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent); transform: translateY(-2px); }
+  .booking { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 13px; color: var(--muted); }
+  .field input, .field select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .field input:focus, .field select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; }
+  .facts dt { color: var(--muted); }
+  .facts dd { margin: 0; }
+  .facts dd.total, .big { font-weight: 700; font-size: 20px; }
+  .big { margin: 0 0 12px; }
+  .panel { border-left: 4px solid var(--accent); }
+  .panel.ok { border-left-color: #2e9d5b; }
+  .panel.cancelled { border-left-color: #c97a00; }

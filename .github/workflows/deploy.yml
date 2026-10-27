@@ -1,6 +1,10 @@
 name: deploy
-# Deploys a tenant with the serve7-deploy role (OIDC, bound to the GitHub environment <tenant>-<env>),
-# then runs the smoke tests. Runs on merge to main for the sandbox, or manually for any tenant.
+# Deploys tenants with the serve7-deploy role (OIDC), then runs the smoke tests.
+# - Merge to main: the tenants in the repository variable CI_TENANTS (default: DEFAULT_TENANT, else sandbox), never prod.
+# - Manual run: any tenant/env (prod needs the <tenant>-prod GitHub environment with required reviewers).
+# Repository variables: CI_TENANTS, DEFAULT_TENANT, DEFAULT_ENV, USE_ENVIRONMENTS (false = no GitHub environments,
+# bootstrap with DEPLOY_TRUST=main-branch), AWS_CI (false = skip until the account is bootstrapped). See docs/setup-new-org.md.
+# Source copy: ci/workflows/deploy.yml (install with scripts/install-workflows.sh).
 on:
   push:
     branches: [main]
@@ -8,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       tenant:
-        description: Tenant folder under tenants/
-        default: sandbox
-        required: true
+        description: Tenant folder under tenants/ (empty = DEFAULT_TENANT variable)
+        default: ""
+        required: false
       env:
         description: Environment
         type: choice
@@ -21,17 +25,49 @@ permissions:
   id-token: write
   contents: read
 
-concurrency:
-  group: deploy-${{ inputs.tenant || 'sandbox' }}-${{ inputs.env || 'dev' }}
-  cancel-in-progress: false   # never interrupt an apply
-
 jobs:
-  deploy:
+  tenants:
     runs-on: ubuntu-24.04
-    environment: ${{ vars.USE_ENVIRONMENTS != 'false' && format('{0}-{1}', inputs.tenant || 'sandbox', inputs.env || 'dev') || '' }}
+    if: github.event_name == 'workflow_dispatch' || vars.AWS_CI != 'false'
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+      count: ${{ steps.m.outputs.count }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -q pyyaml
+      - name: Tenants to deploy
+        id: m
+        env:
+          CI_TENANTS: ${{ vars.CI_TENANTS }}
+          DEFAULT_TENANT: ${{ vars.DEFAULT_TENANT }}
+          DEFAULT_ENV: ${{ vars.DEFAULT_ENV }}
+          IN_TENANT: ${{ inputs.tenant }}
+          IN_ENV: ${{ inputs.env }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            python scripts/ci-tenants.py --tenant "${IN_TENANT:-${DEFAULT_TENANT:-sandbox}}" --env "$IN_ENV" --github >> "$GITHUB_OUTPUT"
+          else
+            python scripts/ci-tenants.py --no-prod --github >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    needs: tenants
+    if: needs.tenants.outputs.count != '0'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.tenants.outputs.matrix) }}
+    concurrency:
+      group: deploy-${{ matrix.tenant }}-${{ matrix.env }}
+      cancel-in-progress: false   # never interrupt an apply
+    environment: ${{ vars.USE_ENVIRONMENTS != 'false' && format('{0}-{1}', matrix.tenant, matrix.env) || '' }}
     env:
-      TENANT: ${{ inputs.tenant || 'sandbox' }}
-      ENVIRONMENT: ${{ inputs.env || 'dev' }}
+      TENANT: ${{ matrix.tenant }}
+      ENVIRONMENT: ${{ matrix.env }}
     steps:
       - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v4

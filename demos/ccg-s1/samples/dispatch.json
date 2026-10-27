@@ -1,0 +1,37 @@
+{
+  "operation": "dispatch",
+  "path": "/dispatch",
+  "success": {
+    "request": {
+      "member_id": "M-20481537",
+      "location": "Highway 401 eastbound near Joyceville Road, Kingston",
+      "service": "tow",
+      "destination": "nearest_certified"
+    },
+    "response": {
+      "dispatched": true,
+      "dispatch_id": "D-20261015-3410",
+      "provider": "Kingston Auto Services",
+      "driver": "Mike T.",
+      "eta_min_low": 25,
+      "eta_min_high": 30,
+      "destination": "certified repair shop, Princess Street, Kingston",
+      "shop_hours_today": "open until 5 PM today",
+      "message": "Kingston Auto Services is on the way. Your driver is Mike T., arriving in about 25 to 30 minutes. They'll take your vehicle to the certified repair shop, Princess Street, Kingston."
+    }
+  },
+  "error": {
+    "request": {
+      "member_id": "M-20481537",
+      "service": "tow"
+    },
+    "response": {
+      "dispatched": false,
+      "error": "missing_fields",
+      "valid_options": [
+        "location"
+      ],
+      "message": "I need the vehicle's location before I can send a truck."
+    }
+  }
+}

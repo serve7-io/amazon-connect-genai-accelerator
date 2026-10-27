@@ -1,0 +1,96 @@
+name: validate
+# Static checks on every push and PR. No AWS access.
+# Source copy: ci/workflows/validate.yml (install with scripts/install-workflows.sh).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install tools
+        run: pip install -q pytest boto3 pyyaml cfn-lint checkov
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive stacks modules
+
+      - name: Terraform validate (every stack)
+        run: |
+          set -e
+          for s in stacks/*/; do
+            [ "$s" = "stacks/_shared/" ] && continue
+            echo "::group::$s"
+            terraform -chdir="$s" init -backend=false -input=false >/dev/null
+            terraform -chdir="$s" validate
+            echo "::endgroup::"
+          done
+
+      - name: CloudFormation lint
+        run: cfn-lint bootstrap/bootstrap.yaml modules/*/template.yaml cloudformation/*/template.yaml
+
+      - name: Tenant folders are complete and consistent
+        run: python scripts/check-tenants.py
+
+      - name: CloudFormation stacks ignore tag changes
+        run: |
+          if [ -f scripts/check-stack-tags.py ]; then python scripts/check-stack-tags.py; else echo "check-stack-tags.py not in this revision"; fi
+
+      - name: Repo tooling tests (CI tenant matrix, new-org setup)
+        run: python -m pytest -q tests/unit
+
+      - name: Installed workflows match ci/workflows (warning only)
+        run: |
+          for f in ci/workflows/*.yml; do
+            w=".github/workflows/$(basename "$f")"
+            cmp -s "$f" "$w" || echo "::warning file=$w::differs from $f - install with scripts/install-workflows.sh (or the GitHub web editor)"
+          done
+
+      - name: Lambda unit tests
+        run: |
+          dirs="lambdas/genai_gateway/tests lambdas/agent_tools/tests"
+          [ -d lambdas/data_table_manager/tests ] && dirs="$dirs lambdas/data_table_manager/tests"
+          python -m pytest -q $dirs
+
+      - name: CloudFormation Phase 1 tools (flow templatizer, wiring verifier)
+        run: python -m pytest -q cloudformation/connect-phase1/tests
+
+      - name: Flow template renders for every tenant
+        run: |
+          set -e
+          for t in tenants/*/; do
+            t=$(basename "$t"); [ "$t" = "_template" ] && continue
+            python - "$t" <<'PY'
+          import json, re, sys
+          t = open("flows/inbound-main.json.tftpl").read()
+          for ss in (True, False):
+              r = re.sub(r"%\{ if self_service \}(.*?)%\{ endif \}", (lambda m: m.group(1)) if ss else "", t, flags=re.S)
+              r = r.replace('${self_service ? "qic-session" : "classify"}', "qic-session" if ss else "classify")
+              r = r.replace("${recorded_participants}", '["Agent"]')
+              r = re.sub(r"\$\{(\w+)\}", "X", r)
+              d = json.loads(r)
+              ids = {a["Identifier"] for a in d["Actions"]}
+              nxt = set()
+              for a in d["Actions"]:
+                  tr = a["Transitions"]
+                  nxt |= {tr.get("NextAction")} | {c["NextAction"] for c in tr.get("Conditions", [])} | {e["NextAction"] for e in tr.get("Errors", [])}
+              nxt.discard(None)
+              assert not (nxt - ids), f"dangling transitions: {nxt - ids}"
+          print(sys.argv[1], "flow template OK")
+          PY
+          done
+
+      - name: Checkov (report only for now)
+        run: checkov -d stacks -d modules --framework terraform --quiet --compact --soft-fail
