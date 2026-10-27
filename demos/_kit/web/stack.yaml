@@ -1,0 +1,199 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Serve7 demo kit - shared web test pages. One private S3 bucket behind one CloudFront distribution (HTTPS, noindex),
+  one folder per demo (/<demo>/), plus a small start-chat / start-voice endpoint on the same domain (/<demo>/start-chat,
+  /<demo>/start-voice) that the Amazon Connect Touchpoint web chat and voice call. Synthetic data only. Deployed by
+  demos/_kit/deploy-web.sh.
+
+Parameters:
+  CodeBucket:
+    Type: String
+  CodeKey:
+    Type: String
+    Description: S3 key of the start-chat Lambda zip (demos/_kit/web/start_chat)
+
+Resources:
+  # ---------- pages ----------
+  WebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CloudFrontReadOnly
+            Effect: Allow
+            Principal: {Service: cloudfront.amazonaws.com}
+            Action: s3:GetObject
+            Resource: !Sub "${WebBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+          - Sid: TlsOnly
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource: [!GetAtt WebBucket.Arn, !Sub "${WebBucket.Arn}/*"]
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-s3"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # /renault-rental -> /renault-rental/index.html ; /renault-rental/ -> /renault-rental/index.html
+  IndexFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "${AWS::StackName}-index"
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Serve index.html for folder URLs
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var r = event.request, u = r.uri;
+          if (u.endsWith('/')) { r.uri = u + 'index.html'; }
+          else if (u.indexOf('.', u.lastIndexOf('/')) === -1) { r.uri = u + '/index.html'; }
+          return r;
+        }
+
+  HeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "${AWS::StackName}-headers"
+        Comment: Demo pages are not for search engines
+        SecurityHeadersConfig:
+          StrictTransportSecurity: {AccessControlMaxAgeSec: 31536000, IncludeSubdomains: true, Override: true}
+          ContentTypeOptions: {Override: true}
+          FrameOptions: {FrameOption: SAMEORIGIN, Override: true}
+          ReferrerPolicy: {ReferrerPolicy: strict-origin-when-cross-origin, Override: true}
+        CustomHeadersConfig:
+          Items:
+            - {Header: X-Robots-Tag, Value: "noindex, nofollow", Override: true}
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "${AWS::StackName}: demo test pages and chat start endpoint"
+        PriceClass: PriceClass_100
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        ViewerCertificate: {CloudFrontDefaultCertificate: true}
+        Origins:
+          - Id: pages
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig: {OriginAccessIdentity: ""}
+          - Id: start-chat
+            DomainName: !Select [2, !Split ["/", !GetAtt StartChatUrl.FunctionUrl]]
+            CustomOriginConfig:
+              HTTPSPort: 443
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+        DefaultCacheBehavior:
+          TargetOriginId: pages
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad      # Managed-CachingDisabled: demo pages change often
+          ResponseHeadersPolicyId: !Ref HeadersPolicy
+          Compress: true
+          FunctionAssociations:
+            - {EventType: viewer-request, FunctionARN: !GetAtt IndexFunction.FunctionARN}
+        CacheBehaviors:
+          - PathPattern: "/*/start-chat"
+            TargetOriginId: start-chat
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad     # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac   # Managed-AllViewerExceptHostHeader
+            ResponseHeadersPolicyId: !Ref HeadersPolicy
+          - PathPattern: "/*/start-voice"
+            TargetOriginId: start-chat
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad     # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac   # Managed-AllViewerExceptHostHeader
+            ResponseHeadersPolicyId: !Ref HeadersPolicy
+
+  # ---------- start-chat endpoint (browser-facing, locked down in code) ----------
+  StartChatRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: start-chat
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [connect:StartChatContact, connect:StartWebRTCContact]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:connect:${AWS::Region}:${AWS::AccountId}:instance/*/contact-flow/*"
+                  - !Sub "arn:${AWS::Partition}:connect:${AWS::Region}:${AWS::AccountId}:instance/*"
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/demo-kit/web/*"
+
+  StartChatFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.13
+      Handler: handler.handler
+      Timeout: 10
+      MemorySize: 256
+      Role: !GetAtt StartChatRole.Arn
+      Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
+  StartChatUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt StartChatFunction.Arn
+      AuthType: NONE   # only CloudFront knows this URL; the code ignores everything except the demo name and display name
+  StartChatUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref StartChatFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+  StartChatInvokeViaUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref StartChatFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+Outputs:
+  WebUrl:
+    Value: !Sub "https://${Distribution.DomainName}"
+  WebBucketName:
+    Value: !Ref WebBucket
+  DistributionId:
+    Value: !Ref Distribution

@@ -1,0 +1,41 @@
+{
+  "name": "yamaha-moto",
+  "title": "Yamaha moto rental chat agent (Belgrade, EUR)",
+  "stack": "demo-yamaha-moto",
+  "region": "ca-central-1",
+  "lambda_dir": "lambdas/api",
+  "seed": "data/seed.json",
+  "acxd_secret": "ccg_s5_api_key",
+  "status_tables": [
+    "FleetTable",
+    "ReservationsTable"
+  ],
+  "tags": {
+    "serve7:project": "demo",
+    "serve7:demo": "yamaha-moto",
+    "serve7:data-classification": "synthetic"
+  },
+  "smoke": {
+    "op": "list_bikes"
+  },
+  "web": {
+    "title": "Yamaha motorcycle rental, Belgrade",
+    "brand": "Yamaha Motorcycle D.O.O.",
+    "assistant_name": "Yamaha rental assistant",
+    "blurb": "Ask about bikes, prices and availability, or book a motorcycle. This is a demo with invented data.",
+    "accent": "#1c4aa6",
+    "language": "en-US",
+    "display_name": "Customer",
+    "prompts": [
+      "Hi, what bikes can I rent with an A2 licence?",
+      "Is the Tracer 9 GT free this weekend?",
+      "Koliko košta MT-07 od petka do ponedeljka?",
+      "Can you cancel my booking? My phone is 064 123 4567"
+    ],
+    "connect_instance_id": "78261fe2-310c-4f82-8437-4239487463ac",
+    "acxd": {
+      "workspace_id": "f2e8e16b-df1e-4177-a3d8-42b833becf81",
+      "application_id": "0ff4646f-4264-4084-86e7-81ea9fc5fe83"
+    }
+  }
+}

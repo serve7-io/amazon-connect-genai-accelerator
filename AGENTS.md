@@ -5,3 +5,5 @@
 - Every Bedrock call: guardrailConfig (numbered version, trace disabled), explicit maxTokens, untrusted text in guardContent.
 - Flow JSON is edited only through `${...}` template placeholders.
 - Before committing: `python3 -m pytest -q lambdas/genai_gateway/tests`, `terraform validate` per stack, `cfn-lint bootstrap/bootstrap.yaml`.
+- Workflow changes go into `ci/workflows/` (a person installs them into `.github/workflows/`); keep both in sync.
+- Before committing tooling changes: `python3 -m pytest -q tests/unit`.

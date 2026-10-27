@@ -1,0 +1,33 @@
+{
+  "operation": "verifyservice",
+  "path": "/verifyservice",
+  "success": {
+    "request": {
+      "member_id": "M-20481537",
+      "vehicle_confirmed": "2023 Honda CR-V",
+      "interaction_type": "service"
+    },
+    "response": {
+      "verified": true,
+      "auth_level": "service",
+      "auth_status": "Verified",
+      "method": "membership number + vehicle",
+      "member_id": "M-20481537",
+      "message": "Thank you, Sarah. You're verified."
+    }
+  },
+  "error": {
+    "request": {
+      "member_id": "M-20481537",
+      "vehicle_confirmed": "Ford F-150",
+      "interaction_type": "service"
+    },
+    "response": {
+      "verified": false,
+      "error": "not_verified",
+      "auth_level": "service",
+      "auth_status": "Not verified",
+      "message": "That doesn't match what we have on file. Could you check the details and try again?"
+    }
+  }
+}

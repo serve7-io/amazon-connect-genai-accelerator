@@ -1,0 +1,364 @@
+{
+  "flowId": "ccgrenewalpayment",
+  "nodes": {
+    "3ee6e0fb-15c7-42d7-bf86-3c2e6b5e62ed": {
+      "nodeId": "3ee6e0fb-15c7-42d7-bf86-3c2e6b5e62ed",
+      "childNodes": [
+        {
+          "nodeId": "5c1d7e2a-9b44-4f0e-a6d3-2f8e1c7b9a10",
+          "name": "",
+          "conditions": [
+            {
+              "left": {
+                "type": "system",
+                "name": "System.gjConditionIndex"
+              },
+              "operator": "eq",
+              "right": {
+                "type": "constant",
+                "value": 0
+              }
+            }
+          ]
+        },
+        {
+          "nodeId": "5c1d7e2a-9b44-4f0e-a6d3-2f8e1c7b9a10",
+          "name": "",
+          "conditions": [
+            {
+              "left": {
+                "type": "system",
+                "name": "System.gjConditionIndex"
+              },
+              "operator": "eq",
+              "right": {
+                "type": "constant",
+                "value": 1
+              }
+            }
+          ]
+        },
+        {
+          "nodeId": "44842a1e-d0b3-58d8-b17b-462734e0ecea",
+          "name": "",
+          "conditions": [
+            {
+              "left": {
+                "type": "system",
+                "name": "System.gjConditionIndex"
+              },
+              "operator": "eq",
+              "right": {
+                "type": "constant",
+                "value": 2
+              }
+            }
+          ]
+        },
+        {
+          "nodeId": "44842a1e-d0b3-58d8-b17b-462734e0ecea",
+          "name": "",
+          "conditions": [
+            {
+              "left": {
+                "type": "system",
+                "name": "System.gjConditionIndex"
+              },
+              "operator": "eq",
+              "right": {
+                "type": "constant",
+                "value": 3
+              }
+            }
+          ]
+        },
+        {
+          "nodeId": "44842a1e-d0b3-58d8-b17b-462734e0ecea",
+          "name": "",
+          "conditions": [
+            {
+              "left": {
+                "type": "system",
+                "name": "System.gjConditionIndex"
+              },
+              "operator": "eq",
+              "right": {
+                "type": "constant",
+                "value": 4
+              }
+            }
+          ]
+        },
+        {
+          "nodeId": "5c1d7e2a-9b44-4f0e-a6d3-2f8e1c7b9a10",
+          "name": "",
+          "conditions": [
+            {
+              "left": {
+                "type": "node_status"
+              },
+              "operator": "eq",
+              "right": {
+                "type": "constant",
+                "value": "timeout"
+              }
+            }
+          ]
+        },
+        {
+          "nodeId": "5c1d7e2a-9b44-4f0e-a6d3-2f8e1c7b9a10",
+          "name": "",
+          "conditions": [
+            {
+              "left": {
+                "type": "node_status"
+              },
+              "operator": "eq",
+              "right": {
+                "type": "constant",
+                "value": "failure"
+              }
+            }
+          ]
+        }
+      ],
+      "type": "generative_journey",
+      "messages": [],
+      "modalities": {},
+      "metadata": {
+        "stateModifications": [],
+        "name": "Renewal payment agent (voice)",
+        "generativeJourney": {
+          "prompt": "You are the CAA voice assistant for insurance payments (fictional demo data only). Voice channel: short, warm, natural sentences; no lists, no markdown. Say amounts the way the tools give them in amount_spoken (for example \"$1,247\"). Read policy numbers in full, e.g. \"HI-2024-88312\".\n\nFrom the phone system: the caller's phone number is {System.userId}; the call id is context variable contact_id ({contact_id}).\n\nFollow this conversation, using these exact phrases where given:\n1. Greeting (your first turn): \"Thank you for calling CAA. How can I help you today?\"\n2. When the caller wants to pay an insurance renewal: \"I can help you with that. Let me pull up your account. Can I have your membership number?\" Anything other than paying an insurance renewal is out of scope here: offer a team member (exit: team_member).\n3. Call lookupmember with the membership number. If found is false, ask them to repeat it once; after a second miss, exit: team_member. If found: \"Thank you, [first_name]. I have your account. Since you're making a payment, I need to verify your identity with a couple of security questions. Can you confirm your date of birth?\"\n4. Then: \"Thank you. And can you confirm the postal code on your account?\" Only after you have BOTH the date of birth and the postal code, call verifymember with interaction_type \"payment\", membership_number, dob (YYYY-MM-DD) and postal_code. If it returns missing, ask for that detail (this is not a failed try). If verified: \"Perfect — you're verified.\" If not: \"I'm sorry, I wasn't able to verify those details. Let's try once more.\" and ask for both again. Never say which detail did not match. After 2 failed tries, exit: team_member.\n5. Call getpolicies. Describe every policy with payable_here true, one sentence each, for example: \"I can see you have two active policies on your account. Your home insurance — policy HI-2024-88312 — has a renewal balance of $1,247. And your auto insurance — policy AI-2024-66201 — has a balance of $863.\" Then confirm the one the caller asked for: \"You mentioned home insurance. Would you like to pay the $1,247 for policy HI-2024-88312?\" If they did not say which, ask which one.\n6. When they confirm which policy, you MUST say this and wait for the answer (never skip it, never call preparecardentry yet): \"Got it — [amount] for your [line_name] renewal. I'll set up the secure payment now. You'll enter your card number using your phone's keypad. Your card information is fully encrypted and won't be stored or recorded. Ready?\"\n7. Only after the caller answers \"Ready?\" with ready/yes: call preparecardentry (contact_id, policy_id, member_id). If ready is true, exit: collect_new_card immediately without saying anything else — the phone system prompts for the card number, expiry and security code on the keypad, processes the payment, reads the result and then brings the caller back to you.\n8. When the caller comes back from card entry: call paymentstatus (policy_id, contact_id) before saying anything.\n   - approved: do NOT repeat the amount or confirmation number (the phone system just read them). Say: \"Your [line_name] policy [policy_id] is now paid in full. Your next renewal date is [next_renewal].\" If receipt is sms_sent, add \"I'm sending you a text message with your confirmation number and payment details.\" (if receipt is none, say nothing about a text). Then: \"Is there anything else I can help you with?\" If they want to pay the other policy too, repeat from step 6 for it.\n   - declined, invalid_card or card_expired: the phone system already allowed up to 3 tries. Say the card could not be processed and nothing was charged, then offer: a team member (exit: team_member) or a callback (exit: callback).\n   - gateway_unavailable: \"Our payment system is temporarily unavailable, and nothing was charged.\" Offer a callback (exit: callback) or a team member (exit: team_member).\n   - none: the card entry was not finished. Offer to try again (back to step 6) or a team member.\n9. When the caller has nothing else: call addnote with a one-line summary (no card data), then say \"You're welcome, [first_name]. Have a great day.\" and exit: paid_done.\n\nStored card: only if the caller asks to use a card on file. Call getpaymentmethods, offer it by brand and last 4 digits only, read back \"You authorize CAA to charge [amount] to your [brand] ending [last4] for policy [policy_id] today. Please say yes to confirm.\", and only after a clear yes call chargestoredcard. If unclear or it times out, call paymentstatus before anything else. On approved, give the confirmation number, then continue as in step 8 approved.\n\nIf a tool call fails or returns an error: say \"Sorry, one moment.\" and try that tool once more with the same values. If it fails again, apologise, say nothing was charged, and offer a callback (exit: callback) or a team member (exit: team_member).\n\nHard rules:\n- Never ask for, repeat or accept a card number, expiry date or security code by voice. If the caller starts reading card digits: \"Please don't read your card number out loud; you'll enter it on your keypad.\"\n- Never invent amounts, dates, confirmation numbers or policy details: only use values a tool returned.\n- Partial payments are not possible.\n- If the caller asks for a person at any time, exit: team_member.",
+          "exitConditions": [
+            {
+              "name": "collect_new_card",
+              "prompt": "The caller said ready for keypad card entry and preparecardentry returned ready true. The phone system takes the card on the keypad and brings the caller back."
+            },
+            {
+              "name": "team_member",
+              "prompt": "The caller asks for a person, the request is out of scope, the member could not be found or verified, or the caller chose a team member."
+            },
+            {
+              "name": "paid_done",
+              "prompt": "Payment approved, the caller has nothing else, addnote was called and the goodbye was said."
+            },
+            {
+              "name": "sms_link",
+              "prompt": "The caller accepted a secure payment link by text (only when sms_capable is true). Not offered in the standard script."
+            },
+            {
+              "name": "callback",
+              "prompt": "Payments are not working and the caller accepted a callback once they work again."
+            }
+          ],
+          "tools": [
+            {
+              "type": "dataRequest",
+              "dataRequest": {
+                "type": "custom",
+                "dataRequestId": "lookupmember",
+                "payload": {},
+                "params": {},
+                "headers": {}
+              },
+              "prompt": "Step 3: send membership_number exactly as the caller says it (e.g. M-60425183). Returns found, member_id, first_name, tier. Do not treat the caller as verified yet.",
+              "scopeTags": []
+            },
+            {
+              "type": "dataRequest",
+              "dataRequest": {
+                "type": "custom",
+                "dataRequestId": "verifymember",
+                "payload": {},
+                "params": {},
+                "headers": {}
+              },
+              "prompt": "Step 4, only when you have both dob and postal_code: send membership_number, interaction_type \"payment\", dob as YYYY-MM-DD and postal_code as said, and caller_phone = {System.userId}. Returns verified, member_id, first_name, sms_capable, or missing (ask for that detail). Never say which detail failed.",
+              "scopeTags": []
+            },
+            {
+              "type": "dataRequest",
+              "dataRequest": {
+                "type": "custom",
+                "dataRequestId": "getpolicies",
+                "payload": {},
+                "params": {},
+                "headers": {}
+              },
+              "prompt": "After verifymember succeeds: send member_id. Returns policies with policy_id, line_name, amount_spoken, renewal_date, plan_type and payable_here.",
+              "scopeTags": []
+            },
+            {
+              "type": "dataRequest",
+              "dataRequest": {
+                "type": "custom",
+                "dataRequestId": "getpaymentmethods",
+                "payload": {},
+                "params": {},
+                "headers": {}
+              },
+              "prompt": "Only if the caller asks to use a card on file: send member_id. Returns stored cards (token, brand, last4, expired). Never read the token aloud.",
+              "scopeTags": []
+            },
+            {
+              "type": "dataRequest",
+              "dataRequest": {
+                "type": "custom",
+                "dataRequestId": "chargestoredcard",
+                "payload": {},
+                "params": {},
+                "headers": {}
+              },
+              "prompt": "Only after a clear yes to the stored-card authorization read-back. Send member_id, policy_id, the chosen card token, contact_id = context variable contact_id, and phone = {System.userId} (for the SMS receipt). Returns result, confirmation, next_renewal, receipt.",
+              "scopeTags": []
+            },
+            {
+              "type": "dataRequest",
+              "dataRequest": {
+                "type": "custom",
+                "dataRequestId": "preparecardentry",
+                "payload": {},
+                "params": {},
+                "headers": {}
+              },
+              "prompt": "Step 7, only after the caller answered \"Ready?\" with yes/ready: send contact_id (context variable contact_id, exactly as given), policy_id and member_id. If ready is true, exit with collect_new_card. If ready is false, explain (already paid or not payable here) and do not exit.",
+              "scopeTags": []
+            },
+            {
+              "type": "dataRequest",
+              "dataRequest": {
+                "type": "custom",
+                "dataRequestId": "paymentstatus",
+                "payload": {},
+                "params": {},
+                "headers": {}
+              },
+              "prompt": "Send policy_id and contact_id. Call it first when the caller returns from keypad card entry, and if a stored-card charge timed out or is unclear. Returns result (approved, declined, invalid_card, card_expired, gateway_unavailable, none), confirmation, policy_id, line_name, amount_spoken, next_renewal (e.g. October 2027), receipt. Never charge twice.",
+              "scopeTags": []
+            },
+            {
+              "type": "dataRequest",
+              "dataRequest": {
+                "type": "custom",
+                "dataRequestId": "addnote",
+                "payload": {},
+                "params": {},
+                "headers": {}
+              },
+              "prompt": "At the end of the call: send member_id, policy_id, contact_id and a one-line note of what was done (no card data).",
+              "scopeTags": []
+            }
+          ],
+          "maxTokens": 8192,
+          "maxSteps": 12,
+          "temperature": 0.2,
+          "enableZeroTurnMode": false,
+          "promptVersion": "latest",
+          "modelType": "amazon-nova-2-lite"
+        }
+      },
+      "canvasMetadata": {
+        "x": -935,
+        "y": -320,
+        "width": 240,
+        "height": 203,
+        "isMinimized": false
+      }
+    },
+    "44842a1e-d0b3-58d8-b17b-462734e0ecea": {
+      "nodeId": "44842a1e-d0b3-58d8-b17b-462734e0ecea",
+      "childNodes": [],
+      "type": "terminate",
+      "messages": [],
+      "modalities": {},
+      "metadata": {
+        "stateModifications": [],
+        "name": "Done (paid, SMS link or callback)"
+      },
+      "canvasMetadata": {
+        "x": -437,
+        "y": -314,
+        "width": 240,
+        "height": 84,
+        "isMinimized": false
+      }
+    },
+    "74afd0b2-cfdb-5008-91c0-43c2a02b8805": {
+      "nodeId": "74afd0b2-cfdb-5008-91c0-43c2a02b8805",
+      "childNodes": [
+        {
+          "nodeId": "3ee6e0fb-15c7-42d7-bf86-3c2e6b5e62ed",
+          "name": "",
+          "conditions": []
+        }
+      ],
+      "type": "start",
+      "messages": [],
+      "modalities": {},
+      "metadata": {
+        "stateModifications": [],
+        "name": ""
+      },
+      "canvasMetadata": {
+        "x": -1380,
+        "y": -360,
+        "width": 240,
+        "height": 199,
+        "isMinimized": false
+      }
+    },
+    "5c1d7e2a-9b44-4f0e-a6d3-2f8e1c7b9a10": {
+      "nodeId": "5c1d7e2a-9b44-4f0e-a6d3-2f8e1c7b9a10",
+      "childNodes": [
+        {
+          "nodeId": "3ee6e0fb-15c7-42d7-bf86-3c2e6b5e62ed",
+          "name": "",
+          "conditions": [
+            {
+              "left": {
+                "type": "node_status"
+              },
+              "operator": "eq",
+              "right": {
+                "type": "constant",
+                "value": "continuation"
+              }
+            }
+          ]
+        }
+      ],
+      "type": "escalate",
+      "messages": [],
+      "modalities": {},
+      "metadata": {
+        "stateModifications": [],
+        "name": "Hand over to phone system (keypad card entry or team member)"
+      },
+      "canvasMetadata": {
+        "x": -437,
+        "y": -80,
+        "width": 240,
+        "height": 120,
+        "isMinimized": false
+      }
+    }
+  },
+  "description": "CAA Scenario 5 (synthetic data): self-service voice payment renewal. Card data is never collected here; the Connect secure keypad segment does that.",
+  "aiDescription": "",
+  "untrained": true,
+  "slotTypes": [],
+  "metadata": {
+    "path": "",
+    "tags": [
+      "serve7-demo",
+      "ccg-rfp",
+      "scenario-5"
+    ]
+  },
+  "mainLanguageCode": "en-US",
+  "languageCodes": [
+    "en-US"
+  ],
+  "mirroring": "none"
+}

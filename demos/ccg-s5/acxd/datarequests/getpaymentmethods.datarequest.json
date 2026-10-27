@@ -1,0 +1,96 @@
+{
+  "dataRequestId": "getpaymentmethods",
+  "type": "object",
+  "webhook": {
+    "version": "v3",
+    "sendContext": true,
+    "implementation": "external",
+    "method": "POST",
+    "environments": {
+      "production": {
+        "url": "https://YOUR-ACXD-API-URL/get_payment_methods",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "dynamic": false,
+            "required": false
+          },
+          {
+            "key": "x-api-key",
+            "value": "{ccg_s5_api_key:NLX.Secret}",
+            "dynamic": false,
+            "required": false
+          }
+        ]
+      }
+    }
+  },
+  "description": "Stored cards of the member (token, brand, last 4 only).",
+  "sensitive": false,
+  "streamStateModifications": false,
+  "requestSchema": {
+    "type": "object",
+    "properties": {
+      "member_id": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "CCG member id from verifymember, e.g. M-1001"
+      }
+    },
+    "isSensitive": false,
+    "title": "",
+    "description": ""
+  },
+  "responseSchema": {
+    "type": "object",
+    "properties": {
+      "methods": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "token": {
+              "type": "string",
+              "isSensitive": false,
+              "title": "",
+              "description": "Card token for chargestoredcard; never read aloud"
+            },
+            "brand": {
+              "type": "string",
+              "isSensitive": false,
+              "title": "",
+              "description": ""
+            },
+            "last4": {
+              "type": "string",
+              "isSensitive": false,
+              "title": "",
+              "description": ""
+            },
+            "expired": {
+              "type": "boolean",
+              "isSensitive": false,
+              "title": "",
+              "description": ""
+            }
+          },
+          "isSensitive": false,
+          "title": "",
+          "description": ""
+        },
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      }
+    },
+    "isSensitive": false,
+    "title": "",
+    "description": ""
+  },
+  "metadata": {
+    "path": "",
+    "tags": []
+  }
+}

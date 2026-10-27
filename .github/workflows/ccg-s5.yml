@@ -1,0 +1,140 @@
+name: ccg-s5
+# CCG CAA Scenario 5 demo (hoplitemarketing 480315222980, ca-central-1): tests, deploy and day-to-day operations.
+#
+# Run an operation by opening an issue titled  "ccg-s5: <command> [argument]"  (Claude does this from chat),
+# or from the Actions tab (Run workflow). The result is posted as a comment and the issue is closed.
+#   test | deploy | main-flow | reset | status | transcript [contact-id] | diag [minutes] | gateway-down | gateway-normal
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      command:
+        description: Operation
+        type: choice
+        options: [status, reset, deploy, main-flow, transcript, diag, test, gateway-down, gateway-normal]
+      argument:
+        description: Optional argument (contact id for transcript, minutes for diag)
+        required: false
+  pull_request:
+    paths: ["demos/ccg-s5/**", ".github/workflows/ccg-s5.yml"]
+  push:
+    branches: [main]
+    paths: ["demos/ccg-s5/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ccg-s5-${{ github.event_name == 'pull_request' && github.ref || 'ops' }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ca-central-1
+  AWS_DEFAULT_REGION: ca-central-1
+  CI_ROLE: arn:aws:iam::480315222980:role/serve7-ccg-s5-ci
+  INSTANCE_ID: 78261fe2-310c-4f82-8437-4239487463ac
+  RETURN_FLOW_ARN: arn:aws:connect:ca-central-1:480315222980:instance/78261fe2-310c-4f82-8437-4239487463ac/contact-flow/eb030b34-7193-49c0-bb31-162730f5f38f
+  ALLOWED_ACTORS: "milosjovanic-serve7"
+  DEMO: demos/ccg-s5
+
+jobs:
+  test:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install -q pytest boto3 cryptography aws-encryption-sdk cfn-lint
+      - run: python -m pytest -q $DEMO/tests
+      - run: cfn-lint $DEMO/connect/template.yaml $DEMO/ci/github-trust.yaml
+      - run: for f in $DEMO/scripts/*.sh $DEMO/ci/*.sh; do bash -n "$f"; done
+
+  ops:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' && startsWith(github.event.issue.title, 'ccg-s5:'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
+      issues: write
+    steps:
+      - name: Parse and authorise the request
+        id: req
+        env:
+          EVENT: ${{ github.event_name }}
+          TITLE: ${{ github.event.issue.title }}
+          AUTHOR: ${{ github.event.issue.user.login }}
+          ACTOR: ${{ github.actor }}
+          IN_CMD: ${{ inputs.command }}
+          IN_ARG: ${{ inputs.argument }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "issues" ]; then
+            WHO="$AUTHOR"; REST="${TITLE#ccg-s5:}"; read -r CMD ARG _ <<< "$REST" || true
+          else
+            WHO="$ACTOR"; CMD="$IN_CMD"; ARG="$IN_ARG"
+          fi
+          case " $ALLOWED_ACTORS " in *" $WHO "*) ;; *) echo "::error::$WHO may not run ccg-s5 operations"; exit 1;; esac
+          case "$CMD" in test|deploy|main-flow|reset|status|transcript|diag|gateway-down|gateway-normal) ;; *) echo "::error::unknown command '$CMD'"; exit 1;; esac
+          [[ -z "$ARG" || "$ARG" =~ ^[0-9a-fA-F-]{1,36}$ ]] || { echo "::error::bad argument"; exit 1; }
+          echo "cmd=$CMD" >> "$GITHUB_OUTPUT"; echo "arg=$ARG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install -q boto3 pytest cryptography aws-encryption-sdk cfn-lint
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        if: steps.req.outputs.cmd != 'test'
+        with:
+          role-to-assume: ${{ env.CI_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gh-ccg-s5-${{ github.run_id }}
+
+      - name: Run ${{ steps.req.outputs.cmd }}
+        env:
+          CMD: ${{ steps.req.outputs.cmd }}
+          ARG: ${{ steps.req.outputs.arg }}
+        run: |
+          set -o pipefail
+          cd "$DEMO"
+          run() {
+            case "$CMD" in
+              test)           python -m pytest -q tests && cfn-lint connect/template.yaml ci/github-trust.yaml && echo "lint OK" ;;
+              deploy)         YES=1 SMS=true bash scripts/cloudshell-setup.sh && bash scripts/main-flow.sh ;;
+              main-flow)      bash scripts/main-flow.sh ;;
+              reset)          python3 scripts/seed.py --reset ;;
+              status)         bash scripts/last-calls.sh ${ARG:-2} ;;
+              transcript)     bash scripts/transcript.sh $ARG ;;
+              diag)           bash scripts/diag.sh ${ARG:-30} ;;
+              gateway-down)   aws ssm put-parameter --name /ccg-s5/gateway-mode --type String --overwrite --value down >/dev/null && echo "payment gateway: DOWN (demo objection mode)" ;;
+              gateway-normal) aws ssm put-parameter --name /ccg-s5/gateway-mode --type String --overwrite --value normal >/dev/null && echo "payment gateway: normal" ;;
+            esac
+          }
+          run 2>&1 | tee "$RUNNER_TEMP/out.txt"; rc=${PIPESTATUS[0]}
+          echo "$rc" > "$RUNNER_TEMP/rc.txt"; exit $rc
+
+      - name: Report on the issue
+        if: always() && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          N: ${{ github.event.issue.number }}
+          CMD: ${{ steps.req.outputs.cmd }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          RC=$(cat "$RUNNER_TEMP/rc.txt" 2>/dev/null || echo "?")
+          STATUS=$([ "$RC" = "0" ] && echo "✅ succeeded" || echo "❌ failed (exit $RC)")
+          {
+            echo "**ccg-s5 \`${CMD:-?}\`: $STATUS** · [run log]($URL)"
+            echo; echo '```'
+            tail -c 60000 "$RUNNER_TEMP/out.txt" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' || echo "(no output: the request was rejected before running)"
+            echo '```'
+          } > comment.md
+          gh issue comment "$N" --repo "$GITHUB_REPOSITORY" --body-file comment.md
+          gh issue close "$N" --repo "$GITHUB_REPOSITORY" --reason completed

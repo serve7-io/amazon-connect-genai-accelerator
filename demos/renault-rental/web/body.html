@@ -1,0 +1,152 @@
+  <section class="card" id="fleet-card">
+    <h2>Our cars</h2>
+    <p class="hint">Ask the assistant what suits you; the matching cars light up here.</p>
+    <div class="fleet" id="fleet">
+      <article class="car" id="car-twingo" data-model-id="twingo">
+        <h3>Twingo</h3>
+        <p class="meta">city &middot; petrol &middot; manual</p>
+        <p class="meta">4 seats &middot; 188 l luggage</p>
+        <p class="price"><b>25 EUR</b> / day <span>deposit 300 EUR</span></p>
+        <p class="note">Small city car, easy to park, very low running costs</p>
+      </article>
+      <article class="car" id="car-clio" data-model-id="clio">
+        <h3>Clio</h3>
+        <p class="meta">hatchback &middot; petrol &middot; manual</p>
+        <p class="meta">5 seats &middot; 391 l luggage</p>
+        <p class="price"><b>32 EUR</b> / day <span>deposit 300 EUR</span></p>
+        <p class="note">Popular all-rounder for city and short trips</p>
+      </article>
+      <article class="car" id="car-captur" data-model-id="captur">
+        <h3>Captur</h3>
+        <p class="meta">suv &middot; petrol &middot; automatic</p>
+        <p class="meta">5 seats &middot; 422 l luggage</p>
+        <p class="price"><b>40 EUR</b> / day <span>deposit 400 EUR</span></p>
+        <p class="note">Compact crossover with a high seating position, automatic</p>
+      </article>
+      <article class="car" id="car-megane" data-model-id="megane">
+        <h3>Mégane</h3>
+        <p class="meta">hatchback &middot; diesel &middot; manual</p>
+        <p class="meta">5 seats &middot; 384 l luggage</p>
+        <p class="price"><b>45 EUR</b> / day <span>deposit 400 EUR</span></p>
+        <p class="note">Comfortable and economical on the motorway</p>
+      </article>
+      <article class="car" id="car-kangoo" data-model-id="kangoo">
+        <h3>Kangoo</h3>
+        <p class="meta">van &middot; diesel &middot; manual</p>
+        <p class="meta">5 seats &middot; 775 l luggage</p>
+        <p class="price"><b>50 EUR</b> / day <span>deposit 400 EUR</span></p>
+        <p class="note">Practical van-style car, great for luggage and moves</p>
+      </article>
+      <article class="car" id="car-arkana" data-model-id="arkana">
+        <h3>Arkana</h3>
+        <p class="meta">suv &middot; hybrid &middot; automatic</p>
+        <p class="meta">5 seats &middot; 480 l luggage</p>
+        <p class="price"><b>55 EUR</b> / day <span>deposit 500 EUR</span></p>
+        <p class="note">Coupe-style SUV, hybrid, low fuel use</p>
+      </article>
+      <article class="car" id="car-meganeetech" data-model-id="meganeetech">
+        <h3>Mégane E-Tech</h3>
+        <p class="meta">hatchback &middot; electric &middot; automatic</p>
+        <p class="meta">5 seats &middot; 440 l luggage</p>
+        <p class="price"><b>60 EUR</b> / day <span>deposit 600 EUR</span></p>
+        <p class="note">Fully electric, quiet and quick, charging at your own cost</p>
+      </article>
+      <article class="car" id="car-scenic" data-model-id="scenic">
+        <h3>Scénic</h3>
+        <p class="meta">minivan &middot; hybrid &middot; automatic</p>
+        <p class="meta">5 seats &middot; 545 l luggage</p>
+        <p class="price"><b>65 EUR</b> / day <span>deposit 600 EUR</span></p>
+        <p class="note">Family minivan with a big boot and lots of space</p>
+      </article>
+      <article class="car" id="car-austral" data-model-id="austral">
+        <h3>Austral</h3>
+        <p class="meta">suv &middot; hybrid &middot; automatic</p>
+        <p class="meta">5 seats &middot; 500 l luggage</p>
+        <p class="price"><b>70 EUR</b> / day <span>deposit 800 EUR</span></p>
+        <p class="note">Roomy hybrid SUV for families and longer trips</p>
+      </article>
+      <article class="car" id="car-trafic" data-model-id="trafic">
+        <h3>Trafic</h3>
+        <p class="meta">minibus &middot; diesel &middot; manual</p>
+        <p class="meta">9 seats &middot; 1000 l luggage</p>
+        <p class="price"><b>85 EUR</b> / day <span>deposit 800 EUR</span></p>
+        <p class="note">Nine-seat minibus for groups, still category B</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="card" id="booking-card">
+    <h2>Your booking</h2>
+    <p class="hint">The assistant fills this in while you chat. Tell it when you are ready to book. No payment is taken online.</p>
+    <div class="booking" id="booking">
+      <div class="field">
+        <label for="model">Car model</label>
+        <select id="model" name="model">
+          <option value="">Choose a car</option>
+          <option value="twingo">Twingo</option>
+          <option value="clio">Clio</option>
+          <option value="captur">Captur</option>
+          <option value="megane">Mégane</option>
+          <option value="kangoo">Kangoo</option>
+          <option value="arkana">Arkana</option>
+          <option value="meganeetech">Mégane E-Tech</option>
+          <option value="scenic">Scénic</option>
+          <option value="austral">Austral</option>
+          <option value="trafic">Trafic</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="start_date">Pickup date</label>
+        <input type="date" id="start_date" name="start_date">
+      </div>
+      <div class="field">
+        <label for="end_date">Return date</label>
+        <input type="date" id="end_date" name="end_date">
+      </div>
+      <div class="field">
+        <label for="licence">Driving licence category</label>
+        <select id="licence" name="licence">
+          <option value="">Choose a category</option>
+          <option value="B">B (car)</option>
+          <option value="A2">A2 (motorcycle)</option>
+          <option value="A1">A1 (motorcycle)</option>
+          <option value="A">A (motorcycle)</option>
+          <option value="AM">AM (moped)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="customer_name">Full name</label>
+        <input type="text" id="customer_name" name="customer_name" autocomplete="off" placeholder="First and last name">
+      </div>
+      <div class="field">
+        <label for="phone">Phone number</label>
+        <input type="tel" id="phone" name="phone" autocomplete="off" placeholder="e.g. 064 123 4567">
+      </div>
+    </div>
+  </section>
+
+  <section class="card panel" id="quote-card" hidden>
+    <h2>Your price</h2>
+    <dl class="facts">
+      <dt>Car</dt><dd id="q-model"></dd>
+      <dt>Dates</dt><dd id="q-dates"></dd>
+      <dt>Days</dt><dd id="q-days"></dd>
+      <dt>Subtotal</dt><dd id="q-subtotal"></dd>
+      <dt>Discount</dt><dd id="q-discount"></dd>
+      <dt>Total</dt><dd id="q-total" class="total"></dd>
+      <dt>Deposit (card hold)</dt><dd id="q-deposit"></dd>
+      <dt>Kilometres included</dt><dd id="q-km"></dd>
+    </dl>
+  </section>
+
+  <section class="card panel ok" id="confirm-card" hidden>
+    <h2>Booking confirmed</h2>
+    <p class="big" id="c-number"></p>
+    <dl class="facts">
+      <dt>Car</dt><dd id="c-model"></dd>
+      <dt>Dates</dt><dd id="c-dates"></dd>
+      <dt>Total</dt><dd id="c-total"></dd>
+      <dt>Deposit (card hold)</dt><dd id="c-deposit"></dd>
+    </dl>
+    <p class="hint">Pickup in Belgrade, 09:00-18:00. Bring your driving licence and ID.</p>
+  </section>

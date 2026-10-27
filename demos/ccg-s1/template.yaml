@@ -1,0 +1,498 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Serve7 - CAA RFP Scenario 1 (persistent cross-channel roadside assistance), synthetic data only. Built to Vanja's
+  "CCG Scenario 1 build brief" (15 Oct 2026). Tables ccg-s1-*, Lambda ccg-s1-api (Function URL + Connect invoke),
+  Roadside queue, roadside_dispatch proficiency attribute, routing profile with cross-channel concurrency, and the chat flow
+  ccg-s1-chat-main (created once the ACXD app exists). Does not touch the ccg-s5 stack.
+  Deployed by demos/_kit/deploy.sh (issue "demo: deploy ccg-s1"); the CI role only creates IAM roles named demo-*,
+  so the stack is demo-ccg-s1 and its Lambda role gets an auto-generated demo-ccg-s1-* name.
+
+Parameters:
+  CodeBucket:
+    Type: String
+  CodeKey:
+    Type: String
+  ApiKeySecretArn:
+    Type: String
+    Description: Secrets Manager secret with the x-api-key (shared with Scenario 5; read by CloudFormation, never printed)
+  ConnectInstanceArn:
+    Type: String
+    Default: arn:aws:connect:ca-central-1:480315222980:instance/78261fe2-310c-4f82-8437-4239487463ac
+  SmsEnabled:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+    Description: Phase B/C guide flow sends the tow SMS with the Send message block only when true (needs an SMS number)
+  AcxdWorkspaceId:
+    Type: String
+    Default: f2e8e16b-df1e-4177-a3d8-42b833becf81
+  AcxdApplicationId:
+    Type: String
+    Default: 9088c019-349f-4343-b662-6d9c70a168f6
+    Description: ACXD app ccg-roadside-intake (empty = chat flow not created yet)
+  AcxdAlias:
+    Type: String
+    Default: ""
+    Description: Production deployment key of ccg-roadside-intake
+  SarahDemoPhone:
+    Type: String
+    Default: ""
+    Description: E.164 demo mobile for the outbound quick connect (empty = no quick connect yet)
+
+Conditions:
+  HasAcxd: !And
+    - !Not [!Equals [!Ref AcxdApplicationId, ""]]
+    - !Not [!Equals [!Ref AcxdAlias, ""]]
+  HasSarahPhone: !Not [!Equals [!Ref SarahDemoPhone, ""]]
+
+Resources:
+  # ---------- Data (names follow the ccg-s5 pattern) ----------
+  MembersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ccg-s1-members
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: member_id, AttributeType: S}
+        - {AttributeName: phone_key, AttributeType: S}
+      KeySchema: [{AttributeName: member_id, KeyType: HASH}]
+      GlobalSecondaryIndexes:
+        - IndexName: phone-index
+          KeySchema: [{AttributeName: phone_key, KeyType: HASH}]
+          Projection: {ProjectionType: ALL}
+      SSESpecification: {SSEEnabled: true}
+  ServiceHistoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ccg-s1-service-history
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: member_id, AttributeType: S}
+        - {AttributeName: event_date, AttributeType: S}
+      KeySchema: [{AttributeName: member_id, KeyType: HASH}, {AttributeName: event_date, KeyType: RANGE}]
+      SSESpecification: {SSEEnabled: true}
+  ProvidersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ccg-s1-providers
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: provider_id, AttributeType: S}]
+      KeySchema: [{AttributeName: provider_id, KeyType: HASH}]
+      SSESpecification: {SSEEnabled: true}
+  DispatchesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ccg-s1-dispatches
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: dispatch_id, AttributeType: S}]
+      KeySchema: [{AttributeName: dispatch_id, KeyType: HASH}]
+      SSESpecification: {SSEEnabled: true}
+  ServiceRecordsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ccg-s1-service-records
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: contact_id, AttributeType: S}]
+      KeySchema: [{AttributeName: contact_id, KeyType: HASH}]
+      SSESpecification: {SSEEnabled: true}
+  IntakeTable:   # server-side hand-off: what the ACXD tools returned during the chat, keyed by Connect contact id
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ccg-s1-intake
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: contact_id, AttributeType: S}]
+      KeySchema: [{AttributeName: contact_id, KeyType: HASH}]
+      TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
+      SSESpecification: {SSEEnabled: true}
+
+  # ---------- API ----------
+  ApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: data
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:DeleteItem, dynamodb:Query, dynamodb:Scan]
+                Resource:
+                  - !GetAtt MembersTable.Arn
+                  - !Sub "${MembersTable.Arn}/index/*"
+                  - !GetAtt ServiceHistoryTable.Arn
+                  - !GetAtt ProvidersTable.Arn
+                  - !GetAtt DispatchesTable.Arn
+                  - !GetAtt ServiceRecordsTable.Arn
+                  - !GetAtt IntakeTable.Arn
+        - PolicyName: web-chat   # POST /start-chat (ACXD Touchpoint chat on the portal page)
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: connect:StartChatContact
+                Resource: !Sub "${ConnectInstanceArn}/contact-flow/*"
+              - Effect: Allow
+                Action: connect:ListContactFlows
+                Resource:
+                  - !Ref ConnectInstanceArn
+                  - !Sub "${ConnectInstanceArn}/contact-flow/*"
+
+  ApiFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ccg-s1-api
+      Description: CAA Scenario 1 roadside API (ACXD data requests, Connect flows and guides, member portal page)
+      Runtime: python3.13
+      Handler: handler.handler
+      Timeout: 8
+      MemorySize: 256
+      Role: !GetAtt ApiRole.Arn
+      Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
+      Environment:
+        Variables:
+          MEMBERS_TABLE: !Ref MembersTable
+          HISTORY_TABLE: !Ref ServiceHistoryTable
+          PROVIDERS_TABLE: !Ref ProvidersTable
+          DISPATCHES_TABLE: !Ref DispatchesTable
+          RECORDS_TABLE: !Ref ServiceRecordsTable
+          INTAKE_TABLE: !Ref IntakeTable
+          API_KEY: !Sub "{{resolve:secretsmanager:${ApiKeySecretArn}}}"
+          SMS_ENABLED: !Ref SmsEnabled
+          INSTANCE_ID: !Select [1, !Split ["instance/", !Ref ConnectInstanceArn]]
+          CHAT_FLOW_NAME: ccg-s1-chat-main
+  ApiFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt ApiFunction.Arn
+      AuthType: NONE   # operations check x-api-key; GET / serves the public demo page
+  ApiUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+  ApiInvokeViaUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+  ConnectInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunction
+      Principal: connect.amazonaws.com
+      SourceArn: !Ref ConnectInstanceArn
+      SourceAccount: !Ref AWS::AccountId
+  ConnectLambdaAssociation:
+    Type: AWS::Connect::IntegrationAssociation
+    Properties:
+      InstanceId: !Ref ConnectInstanceArn
+      IntegrationType: LAMBDA_FUNCTION
+      IntegrationArn: !GetAtt ApiFunction.Arn
+
+  # ---------- Connect: Roadside queue, proficiency and routing ----------
+  # Console steps (see README): chat attachments, user james.rivera with proficiency roadside_dispatch, Contact Lens
+  # generative summaries, the S1 step-by-step view.
+  RoadsideHours:
+    Type: AWS::Connect::HoursOfOperation
+    Properties:
+      InstanceArn: !Ref ConnectInstanceArn
+      Name: ccg-s1 Roadside 24x7
+      Description: Roadside assistance is available around the clock (demo)
+      TimeZone: America/Toronto
+      Config:
+        - {Day: MONDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
+        - {Day: TUESDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
+        - {Day: WEDNESDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
+        - {Day: THURSDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
+        - {Day: FRIDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
+        - {Day: SATURDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
+        - {Day: SUNDAY, StartTime: {Hours: 0, Minutes: 0}, EndTime: {Hours: 0, Minutes: 0}}
+
+  RoadsideDispatchAttribute:
+    Type: AWS::Connect::PredefinedAttribute
+    Properties:
+      InstanceArn: !Ref ConnectInstanceArn
+      Name: roadside_dispatch
+      Values:
+        StringList: [certified]
+
+  SarahQuickConnect:
+    Type: AWS::Connect::QuickConnect
+    Condition: HasSarahPhone
+    Properties:
+      InstanceArn: !Ref ConnectInstanceArn
+      Name: Sarah Mitchell (demo mobile)
+      Description: CAA Scenario 1 - outbound call from the chat to the member's demo mobile
+      QuickConnectConfig:
+        QuickConnectType: PHONE_NUMBER
+        PhoneConfig: {PhoneNumber: !Ref SarahDemoPhone}
+
+  RoadsideQueue:
+    Type: AWS::Connect::Queue
+    Properties:
+      InstanceArn: !Ref ConnectInstanceArn
+      Name: Roadside
+      Description: >-
+        CAA Scenario 1 - roadside dispatch. Any agent with this queue in their routing profile takes the chat
+        (proficiency-first routing is a later step, see README).
+      HoursOfOperationArn: !GetAtt RoadsideHours.HoursOfOperationArn
+      QuickConnectArns: !If [HasSarahPhone, [!GetAtt SarahQuickConnect.QuickConnectArn], !Ref AWS::NoValue]
+
+  RoadsideRoutingProfile:
+    Type: AWS::Connect::RoutingProfile
+    Properties:
+      InstanceArn: !Ref ConnectInstanceArn
+      Name: Roadside Agents
+      Description: CAA Scenario 1 - chat and voice from the Roadside queue, cross-channel (James Rivera can call while on a chat)
+      DefaultOutboundQueueArn: !GetAtt RoadsideQueue.QueueArn
+      MediaConcurrencies:
+        - {Channel: CHAT, Concurrency: 2, CrossChannelBehavior: {BehaviorType: ROUTE_ANY_CHANNEL}}
+        - {Channel: VOICE, Concurrency: 1, CrossChannelBehavior: {BehaviorType: ROUTE_ANY_CHANNEL}}
+      QueueConfigs:
+        - {Delay: 0, Priority: 1, QueueReference: {Channel: CHAT, QueueArn: !GetAtt RoadsideQueue.QueueArn}}
+        - {Delay: 0, Priority: 1, QueueReference: {Channel: VOICE, QueueArn: !GetAtt RoadsideQueue.QueueArn}}
+
+  # ---------- Phase B: agent step-by-step guide (opens for James when the chat is offered) ----------
+  # AWS managed views (form, confirmation). Member card -> Initiate Dispatch -> dispatch result -> after contact work
+  # (disposition + summary) -> mock ServiceNow write-back. The chat flow hooks it with Set event flow (DefaultAgentUI).
+  GuideFlow:
+    Type: AWS::Connect::ContactFlow
+    DependsOn: ConnectLambdaAssociation
+    Properties:
+      InstanceArn: !Ref ConnectInstanceArn
+      Name: ccg-s1-guide-roadside
+      Type: CONTACT_FLOW
+      Description: >-
+        CAA Scenario 1 step-by-step guide "Roadside Tow Request": member card with Verified and Standard badges,
+        pre-filled case fields, Initiate Dispatch (ccg-s1-api dispatch), confirmation, then after contact work with
+        write-back to the mock ServiceNow (ccg-s1-api writeback).
+      Content: !Sub
+        - |
+          {
+            "Version": "2019-10-30",
+            "StartAction": "member",
+            "Actions": [
+              {"Identifier": "member", "Type": "InvokeLambdaFunction",
+               "Parameters": {"LambdaFunctionARN": "${ApiFunction.Arn}", "InvocationTimeLimitSeconds": "8",
+                 "LambdaInvocationAttributes": {"op": "lookupmember", "member_id": "$.Attributes.s1_member_id"},
+                 "ResponseValidation": {"ResponseType": "STRING_MAP"}},
+               "Transitions": {"NextAction": "card", "Errors": [{"NextAction": "card", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "card", "Type": "ShowView",
+               "Parameters": {"ViewResource": {"Id": "${FormView}"}, "InvocationTimeLimitSeconds": "1800",
+                 "ViewData": {
+                   "Heading": "Roadside Tow Request",
+                   "SubHeading": "$.External.agent_note",
+                   "AttributeBar": [
+                     {"Label": "Member", "Value": "$.External.first_name"},
+                     {"Label": "Membership", "Value": "$.Attributes.s1_member_id", "Copyable": true},
+                     {"Label": "Tier", "Value": "$.External.tier"},
+                     {"Label": "Identity", "Value": "$.Attributes.s1_auth"},
+                     {"Label": "Priority", "Value": "Standard"},
+                     {"Label": "Vehicle", "Value": "$.External.vehicle_spoken"}
+                   ],
+                   "Sections": [
+                     {"_id": "case", "Type": "FormSection", "Heading": "Case details (from the AI intake)",
+                      "Items": [{"LayoutConfiguration": {"Grid": [{"colspan": {"default": "12", "xs": "6"}}, {"colspan": {"default": "12", "xs": "6"}}]},
+                        "Items": [
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Reason", "Name": "reason", "DefaultValue": "Flat tire / Tow"},
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Location", "Name": "location", "DefaultValue": "$.Attributes.s1_location"},
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Safety", "Name": "safety", "DefaultValue": "$.Attributes.s1_safety"},
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Spare tire", "Name": "spare", "DefaultValue": "$.Attributes.s1_spare"},
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Repair shop", "Name": "shop", "DefaultValue": "Nearest certified facility"},
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "AI summary", "Name": "summary", "DefaultValue": "$.Attributes.s1_summary"}
+                        ]}]}
+                   ],
+                   "Next": {"Label": "Initiate Dispatch"},
+                   "Cancel": {"Label": "Skip"}
+                 }},
+               "Transitions": {"NextAction": "dispatch",
+                 "Conditions": [{"NextAction": "acw", "Condition": {"Operator": "Equals", "Operands": ["Cancel"]}}],
+                 "Errors": [{"NextAction": "dispatch", "ErrorType": "NoMatchingCondition"},
+                            {"NextAction": "end", "ErrorType": "NoMatchingError"},
+                            {"NextAction": "end", "ErrorType": "TimeLimitExceeded"}]}},
+              {"Identifier": "dispatch", "Type": "InvokeLambdaFunction",
+               "Parameters": {"LambdaFunctionARN": "${ApiFunction.Arn}", "InvocationTimeLimitSeconds": "8",
+                 "LambdaInvocationAttributes": {"op": "dispatch", "member_id": "$.Attributes.s1_member_id",
+                   "location": "$.Views.ViewResultData.FormData.location", "service": "tow", "destination": "nearest_certified"},
+                 "ResponseValidation": {"ResponseType": "STRING_MAP"}},
+               "Transitions": {"NextAction": "save-dispatch", "Errors": [{"NextAction": "acw", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "save-dispatch", "Type": "UpdateContactAttributes",
+               "Parameters": {"TargetContact": "Current", "Attributes": {
+                 "s1_dispatch_id": "$.External.dispatch_id", "s1_dispatch_provider": "$.External.provider",
+                 "s1_dispatch_driver": "$.External.driver", "s1_dispatch_eta": "$.External.eta_min_low",
+                 "s1_dispatch_eta_high": "$.External.eta_min_high", "s1_dispatch_destination": "$.External.destination",
+                 "s1_dispatch_message": "$.External.message"}},
+               "Transitions": {"NextAction": "dispatched", "Errors": [{"NextAction": "dispatched", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "dispatched", "Type": "ShowView",
+               "Parameters": {"ViewResource": {"Id": "${ConfirmationView}"}, "InvocationTimeLimitSeconds": "1800",
+                 "ViewData": {
+                   "Graphic": {"Include": true},
+                   "Heading": "$.Attributes.s1_dispatch_message",
+                   "SubHeading": "Tell the member the driver's name and ETA. Then finish the case.",
+                   "AttributeBar": [
+                     {"Label": "Dispatch", "Value": "$.Attributes.s1_dispatch_id", "Copyable": true},
+                     {"Label": "Provider", "Value": "$.Attributes.s1_dispatch_provider"},
+                     {"Label": "Driver", "Value": "$.Attributes.s1_dispatch_driver"}
+                   ],
+                   "Next": {"Label": "After contact work"}
+                 }},
+               "Transitions": {"NextAction": "acw",
+                 "Errors": [{"NextAction": "acw", "ErrorType": "NoMatchingCondition"},
+                            {"NextAction": "acw", "ErrorType": "NoMatchingError"},
+                            {"NextAction": "end", "ErrorType": "TimeLimitExceeded"}]}},
+              {"Identifier": "acw", "Type": "ShowView",
+               "Parameters": {"ViewResource": {"Id": "${FormView}"}, "InvocationTimeLimitSeconds": "1800",
+                 "ViewData": {
+                   "Heading": "After contact work",
+                   "SubHeading": "Review, then submit to ServiceNow.",
+                   "AttributeBar": [
+                     {"Label": "Membership", "Value": "$.Attributes.s1_member_id"},
+                     {"Label": "Dispatch", "Value": "$.Attributes.s1_dispatch_id"}
+                   ],
+                   "Sections": [
+                     {"_id": "wrap", "Type": "FormSection", "Heading": "Service record",
+                      "Items": [{"LayoutConfiguration": {"Grid": [{"colspan": {"default": "12"}}]},
+                        "Items": [
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Disposition", "Name": "disposition", "DefaultValue": "Roadside, Tow Dispatched"},
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Dispatch details", "Name": "dispatch", "DefaultValue": "$.Attributes.s1_dispatch_message"},
+                          {"Type": "FormInput", "Fluid": true, "InputType": "text", "Label": "Summary", "Name": "summary", "DefaultValue": "$.Attributes.s1_summary"}
+                        ]}]}
+                   ],
+                   "Next": {"Label": "Submit"}
+                 }},
+               "Transitions": {"NextAction": "writeback",
+                 "Errors": [{"NextAction": "writeback", "ErrorType": "NoMatchingCondition"},
+                            {"NextAction": "end", "ErrorType": "NoMatchingError"},
+                            {"NextAction": "end", "ErrorType": "TimeLimitExceeded"}]}},
+              {"Identifier": "writeback", "Type": "InvokeLambdaFunction",
+               "Parameters": {"LambdaFunctionARN": "${ApiFunction.Arn}", "InvocationTimeLimitSeconds": "8",
+                 "LambdaInvocationAttributes": {"op": "writeback", "member_id": "$.Attributes.s1_member_id",
+                   "dispatch_id": "$.Attributes.s1_dispatch_id",
+                   "disposition": "$.Views.ViewResultData.FormData.disposition",
+                   "summary": "$.Views.ViewResultData.FormData.summary"},
+                 "ResponseValidation": {"ResponseType": "STRING_MAP"}},
+               "Transitions": {"NextAction": "saved", "Errors": [{"NextAction": "end", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "saved", "Type": "ShowView",
+               "Parameters": {"ViewResource": {"Id": "${ConfirmationView}"}, "InvocationTimeLimitSeconds": "600",
+                 "ViewData": {"Graphic": {"Include": true}, "Heading": "$.External.message",
+                   "SubHeading": "The case is closed in ServiceNow. You can end the contact.",
+                   "Next": {"Label": "Done"}}},
+               "Transitions": {"NextAction": "end",
+                 "Errors": [{"NextAction": "end", "ErrorType": "NoMatchingCondition"},
+                            {"NextAction": "end", "ErrorType": "NoMatchingError"},
+                            {"NextAction": "end", "ErrorType": "TimeLimitExceeded"}]}},
+              {"Identifier": "end", "Type": "EndFlowExecution", "Parameters": {}, "Transitions": {}}
+            ]
+          }
+        - FormView: !Sub "arn:aws:connect:${AWS::Region}:aws:view/form:1"
+          ConfirmationView: !Sub "arn:aws:connect:${AWS::Region}:aws:view/confirmation:1"
+
+  # ---------- Chat flow: ACXD roadside intake -> Roadside queue ----------
+  ChatFlow:
+    Type: AWS::Connect::ContactFlow
+    Condition: HasAcxd
+    DependsOn: [ConnectLambdaAssociation, RoadsideDispatchAttribute]
+    Properties:
+      InstanceArn: !Ref ConnectInstanceArn
+      Name: ccg-s1-chat-main
+      Type: CONTACT_FLOW
+      Description: >-
+        CAA Scenario 1 web chat. ACXD app ccg-roadside-intake does the intake; on escalation the intake record that
+        its tool calls wrote (ccg-s1-api op intake, by contact id) becomes s1_* contact attributes and the chat goes to
+        the Roadside queue (same contact, full transcript). Errors also go to Roadside.
+      Content: !Sub
+        - |
+          {
+            "Version": "2019-10-30",
+            "StartAction": "log",
+            "Actions": [
+              {"Identifier": "log", "Type": "UpdateFlowLoggingBehavior",
+               "Parameters": {"FlowLoggingBehavior": "Enabled"}, "Transitions": {"NextAction": "guide"}},
+              {"Identifier": "guide", "Type": "UpdateContactEventHooks",
+               "Parameters": {"EventHooks": {"DefaultAgentUI": "${GuideFlow.ContactFlowArn}"}},
+               "Transitions": {"NextAction": "greet", "Errors": [{"NextAction": "greet", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "greet", "Type": "MessageParticipant",
+               "Parameters": {"Text": "Hi, I'm the CAA roadside assistant. How can I help you today?"},
+               "Transitions": {"NextAction": "agent", "Errors": [{"NextAction": "agent", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "agent", "Type": "ConnectParticipantWithAgenticCX",
+               "Parameters": {"AgentConfiguration": {"WorkspaceId": "${AcxdWorkspaceId}", "ApplicationId": "${AcxdApplicationId}",
+                 "Alias": "${AcxdAlias}", "ContextVariables": {"contact_id": "$.InitialContactId", "channel": "CHAT"}},
+                 "SpeechRecognitionConfiguration": {"SpeechRecognitionEngine": "AMAZON_AGENTIC_VOICE"},
+                 "AudioFillerConfiguration": {"Enabled": false}},
+               "Transitions": {"NextAction": "bye-msg",
+                 "Errors": [{"NextAction": "error-msg", "ErrorType": "NoMatchingError"},
+                            {"NextAction": "bye-msg", "ErrorType": "NoMatchingCondition"},
+                            {"NextAction": "idle-msg", "ErrorType": "InputTimeLimitExceeded"}],
+                 "Conditions": [{"NextAction": "intake", "Condition": {"Operator": "Equals", "Operands": ["Escalation"]}}]}},
+              {"Identifier": "intake", "Type": "InvokeLambdaFunction",
+               "Parameters": {"LambdaFunctionARN": "${ApiFunction.Arn}", "InvocationTimeLimitSeconds": "8",
+                 "LambdaInvocationAttributes": {"op": "intake", "contact_id": "$.InitialContactId"},
+                 "ResponseValidation": {"ResponseType": "STRING_MAP"}},
+               "Transitions": {"NextAction": "attrs", "Errors": [{"NextAction": "queue", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "attrs", "Type": "UpdateContactAttributes",
+               "Parameters": {"TargetContact": "Current", "Attributes": {
+                 "s1_auth": "$.External.auth_status", "s1_tier": "$.External.tier", "s1_vehicle": "$.External.vehicle",
+                 "s1_location": "$.External.location", "s1_safety": "$.External.safety", "s1_spare": "$.External.spare",
+                 "s1_service": "$.External.service", "s1_member_id": "$.External.member_id",
+                 "s1_summary": "$.External.summary", "s1_channel_path": "web chat (AI) to live agent"}},
+               "Transitions": {"NextAction": "queue", "Errors": [{"NextAction": "queue", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "queue", "Type": "UpdateContactTargetQueue",
+               "Parameters": {"QueueId": "${RoadsideQueue.QueueArn}"},
+               "Transitions": {"NextAction": "transfer", "Errors": [{"NextAction": "busy", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "transfer", "Type": "TransferContactToQueue", "Parameters": {},
+               "Transitions": {"NextAction": "busy", "Errors": [{"NextAction": "busy", "ErrorType": "QueueAtCapacity"},
+                                                                {"NextAction": "busy", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "error-msg", "Type": "MessageParticipant",
+               "Parameters": {"Text": "Sorry, something went wrong on our side. I'm connecting you with a roadside agent now."},
+               "Transitions": {"NextAction": "queue", "Errors": [{"NextAction": "queue", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "idle-msg", "Type": "MessageParticipant",
+               "Parameters": {"Text": "I haven't heard from you, so I'll close this chat for now. If you still need help, start a new chat or call us. Stay safe."},
+               "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "busy", "Type": "MessageParticipant",
+               "Parameters": {"Text": "All of our roadside agents are busy right now. Please call us and we'll help you right away."},
+               "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "bye-msg", "Type": "MessageParticipant",
+               "Parameters": {"Text": "Thanks for contacting CAA. Stay safe."},
+               "Transitions": {"NextAction": "bye", "Errors": [{"NextAction": "bye", "ErrorType": "NoMatchingError"}]}},
+              {"Identifier": "bye", "Type": "DisconnectParticipant", "Parameters": {}, "Transitions": {}}
+            ]
+          }
+        - {}
+
+Outputs:
+  AcxdApiUrl:
+    Value: !GetAtt ApiFunctionUrl.FunctionUrl
+  PortalUrl:
+    Value: !GetAtt ApiFunctionUrl.FunctionUrl
+  ApiFunctionArn:
+    Value: !GetAtt ApiFunction.Arn
+  MembersTable:
+    Value: !Ref MembersTable
+  ServiceHistoryTable:
+    Value: !Ref ServiceHistoryTable
+  ProvidersTable:
+    Value: !Ref ProvidersTable
+  DispatchesTable:
+    Value: !Ref DispatchesTable
+  ServiceRecordsTable:
+    Value: !Ref ServiceRecordsTable
+  IntakeTable:
+    Value: !Ref IntakeTable
+  RoadsideQueueArn:
+    Value: !GetAtt RoadsideQueue.QueueArn
+  RoadsideRoutingProfileArn:
+    Value: !GetAtt RoadsideRoutingProfile.RoutingProfileArn
+  GuideFlowArn:
+    Value: !GetAtt GuideFlow.ContactFlowArn
+  ChatFlowArn:
+    Condition: HasAcxd
+    Value: !GetAtt ChatFlow.ContactFlowArn

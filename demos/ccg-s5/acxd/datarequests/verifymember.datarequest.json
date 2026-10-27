@@ -1,0 +1,142 @@
+{
+  "dataRequestId": "verifymember",
+  "type": "object",
+  "webhook": {
+    "version": "v3",
+    "sendContext": true,
+    "implementation": "external",
+    "method": "POST",
+    "environments": {
+      "production": {
+        "url": "https://YOUR-ACXD-API-URL/verify_member",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "dynamic": false,
+            "required": false
+          },
+          {
+            "key": "x-api-key",
+            "value": "{ccg_s5_api_key:NLX.Secret}",
+            "dynamic": false,
+            "required": false
+          }
+        ]
+      }
+    }
+  },
+  "description": "Verifies the caller for an interaction type. payment = date of birth + postal code; service = vehicle on file; account_change = postal code + phone.",
+  "sensitive": true,
+  "streamStateModifications": false,
+  "requestSchema": {
+    "type": "object",
+    "properties": {
+      "membership_number": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "e.g. M-60425183"
+      },
+      "interaction_type": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "payment, service or account_change"
+      },
+      "dob": {
+        "type": "string",
+        "isSensitive": true,
+        "title": "",
+        "description": "Date of birth, YYYY-MM-DD"
+      },
+      "postal_code": {
+        "type": "string",
+        "isSensitive": true,
+        "title": "",
+        "description": "Postal code as said, e.g. K1A 0B1"
+      },
+      "phone": {
+        "type": "string",
+        "isSensitive": true,
+        "title": "",
+        "description": "Phone number on file (account_change only)"
+      },
+      "vehicle": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "Vehicle the caller confirms (service only)"
+      },
+      "caller_phone": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "Caller's phone number, E.164"
+      }
+    },
+    "isSensitive": false,
+    "title": "",
+    "description": ""
+  },
+  "responseSchema": {
+    "type": "object",
+    "properties": {
+      "verified": {
+        "type": "boolean",
+        "isSensitive": false,
+        "title": "",
+        "description": "true or false"
+      },
+      "member_id": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": "Use in all later calls"
+      },
+      "first_name": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "tier": {
+        "type": "string",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "sms_capable": {
+        "type": "boolean",
+        "isSensitive": false,
+        "title": "",
+        "description": "true if a text receipt can be sent"
+      },
+      "caller_id_matches": {
+        "type": "boolean",
+        "isSensitive": false,
+        "title": "",
+        "description": ""
+      },
+      "missing": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "isSensitive": false,
+          "title": "",
+          "description": ""
+        },
+        "isSensitive": false,
+        "title": "",
+        "description": "Details still to collect before verifying (not a failed try)"
+      }
+    },
+    "isSensitive": false,
+    "title": "",
+    "description": ""
+  },
+  "metadata": {
+    "path": "",
+    "tags": []
+  }
+}
