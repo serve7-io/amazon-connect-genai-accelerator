@@ -4,6 +4,8 @@ Use this guide to run the full accelerator from **your own copy of this repo and
 bootstrap, layers 10–50, CI/CD and the AI agent. It is written so that a person and an AI assistant (Claude in Cowork) can
 do it together: every step says who does it.
 
+- Starting from your own Claude account? Do the checklist in [start-here-with-claude.md](start-here-with-claude.md)
+  first (repo copy, connectors, skills, AWS sign-in, budget alert). It also has prompts to paste and the teardown steps.
 - New client tenant inside an org that is already set up: use [runbook-new-tenant.md](runbook-new-tenant.md) instead.
 - Demo kit (`demos/`): it has its own CI trust; see [The two CI trusts](#the-two-ci-trusts) and `demos/_kit/`.
 
@@ -42,7 +44,10 @@ agent) in your account. CI plans every PR and deploys every merge to `main`.
 
 ## 1. Copy the repo (person)
 
-1. GitHub → **Import repository** (or fork) into your org. Keep it **private**: tenant files name accounts and emails.
+The exact commands for a git copy of the private source repo are in [start-here-with-claude.md](start-here-with-claude.md#repo-access).
+
+1. GitHub → **Import repository**, fork, or a git copy pushed into a new empty repo in your org. Keep it **private**:
+   tenant files name accounts and emails.
 2. Install the **Claude GitHub connector** on the new repo, so Claude can open branches and PRs.
 3. Clone it with **git** (not a zip): `deploy.sh` reads the GitHub org and repo for the CI trust from the `origin` remote.
 
@@ -56,8 +61,9 @@ bash scripts/install-workflows.sh            # shows the diff
 bash scripts/install-workflows.sh --apply    # copies into .github/workflows and commits; then push
 ```
 
-Without push rights for workflows, open each `.github/workflows/<name>.yml` in the GitHub web editor and paste the
-`ci/workflows/<name>.yml` content. `validate` warns while they differ.
+A git copy pushed with the workflow scope already contains them. Without push rights for workflows, open each
+`.github/workflows/<name>.yml` in the GitHub web editor and paste the `ci/workflows/<name>.yml` content. `validate`
+warns while they differ.
 
 ## 3. Repository variables (person, before any AWS work)
 

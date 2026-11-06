@@ -7,3 +7,5 @@
 - Before committing: `python3 -m pytest -q lambdas/genai_gateway/tests`, `terraform validate` per stack, `cfn-lint bootstrap/bootstrap.yaml`.
 - Workflow changes go into `ci/workflows/` (a person installs them into `.github/workflows/`); keep both in sync.
 - Before committing tooling changes: `python3 -m pytest -q tests/unit`.
+- Skills for Claude live in `claude/skills/`; when you change a working rule or learn a lesson, update the matching `SKILL.md` in the same PR.
+- Onboarding for people on their own Claude/GitHub/AWS accounts: `docs/start-here-with-claude.md`; keep it in step with `docs/setup-new-org.md`.

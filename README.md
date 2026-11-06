@@ -3,8 +3,9 @@
 Terraform + GitHub Actions framework that stands up Amazon Connect with a guarded Amazon Bedrock
 layer in a fresh AWS account. Design and rationale: see the Implementation Guide (claude.ai doc).
 
-**Using it from another GitHub org or AWS account?** Start with [docs/setup-new-org.md](docs/setup-new-org.md), then run
-`python3 scripts/org-setup.py check --aws`.
+**Using it from another GitHub org, AWS account or Claude account?** Start with
+[docs/start-here-with-claude.md](docs/start-here-with-claude.md) (checklist, Claude skills, prompts, costs, teardown), then
+[docs/setup-new-org.md](docs/setup-new-org.md), and run `python3 scripts/org-setup.py check --aws`.
 
 ## Layout
 | Path | What |
@@ -25,6 +26,9 @@ layer in a fresh AWS account. Design and rationale: see the Implementation Guide
 | `ci/workflows/` | Reviewed sources of `deploy.yml`, `plan.yml`, `validate.yml`; a person installs them into `.github/workflows/` (`scripts/install-workflows.sh`) |
 | `tests/smoke.py` | Post-deploy checks |
 | `docs/runbook-new-tenant.md` | Onboarding a new client tenant, step by step |
+| `docs/start-here-with-claude.md` | Starting from your own Claude + GitHub + AWS accounts: checklist, skills, prompts to paste, costs and teardown |
+| `claude/skills/` | Claude skills for this repo (`connect-accelerator-deployer`, `connect-acxd-demo-builder`); zip and upload them |
+| `tools/account-shutdown.sh` | Inventory, then delete, every project resource that costs money in one account (a person runs `--delete`) |
 | `docs/setup-new-org.md` | Running the accelerator from another GitHub org / AWS account (person + Claude), incl. `claude-operator-policy.json` |
 | `cloudformation/connect-phase1/` | Standalone single-stack Connect instance (deploy / verify / tear down with `phase1.sh`), independent of the Terraform layers |
 | `demos/` | Self-contained client demos, deployed separately from the tenant layers (see [Demos](#demos)) |
